@@ -183,10 +183,10 @@ def _run_plan_locked(cfg, mode_override):
         rc, killed = L.run_agent(cmd, cfg)
         if killed:
             hb(f"  Round A 被 watchdog 中斷（{killed}），清理後重跑下一個 cycle。")
-            L.with_git_lock(cfg, L.git_guard, cfg, i, log_both)
+            L.git_guard(cfg, i, log_both)
             time.sleep(interval)
             continue
-        L.with_git_lock(cfg, L.git_guard, cfg, i, log_both)
+        L.git_guard(cfg, i, log_both)
 
         changed = plan_files_changed(cfg)
         if changed is None:  # 無 git → 用 agent 回填
@@ -200,10 +200,10 @@ def _run_plan_locked(cfg, mode_override):
         rc, killed = L.run_agent(cmd, cfg)
         if killed:
             hb(f"  Round B 被 watchdog 中斷（{killed}），本 cycle 視為無進展。")
-            L.with_git_lock(cfg, L.git_guard, cfg, i, log_both)
+            L.git_guard(cfg, i, log_both)
             gate = None
         else:
-            L.with_git_lock(cfg, L.git_guard, cfg, i, log_both)
+            L.git_guard(cfg, i, log_both)
             gate = L.get_val(plan_md, "plan_gate_last")
 
         stable = (not changed) and (gate == "PASS")

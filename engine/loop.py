@@ -177,13 +177,14 @@ def console_echo_enabled(cfg):
     return bool(cfg.get("runtime", {}).get("console_echo", True))
 
 
-# ─────────────── 檔案鎖（同一 workspace 防重複啟動；同 repo 跨 workspace 序列化 git 操作） ───────────────
+# ─────────────── 單一啟動鎖（防同一 workspace 被重複啟動；非並行機制） ───────────────
 class WorkspaceBusy(Exception):
     pass
 
 
 def acquire_run_lock(path, stale_seconds=3600):
     """獨佔鎖:同一 workspace 不可被兩個引擎程序同時跑(避免互踩 CONTROL/PLAN/git)。
+    這是「防呆/冪等」而非並行支援——本框架不支援同一 code repo 同時跑多個 loop(見 README)。
     鎖檔超過 stale_seconds 視為前次異常結束留下的殘留,允許強制取得(不做跨平台 PID 存活檢查)。"""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if os.path.exists(path):
@@ -207,40 +208,6 @@ def release_run_lock(path):
         os.remove(path)
     except OSError:
         pass
-
-
-def with_git_lock(cfg, fn, *args, timeout=30, **kwargs):
-    """短暫獨佔鎖,序列化「git 變更工作區」的操作(git_guard/inspect_and_fix_blank)。
-    鎖是 repo 層級(放 .loop/.git.lock,跨 workspace 共用),讓同一 repo 內多個 workspace
-    並行跑時,git add/commit 不會互相踩到對方半成品。鎖只在做 git 操作這幾百毫秒內持有。"""
-    lock_path = os.path.join(".loop", ".git.lock")
-    os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
-    deadline = time.monotonic() + timeout
-    got = False
-    while True:
-        try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
-            got = True
-            break
-        except FileExistsError:
-            try:
-                if time.time() - os.path.getmtime(lock_path) > 120:  # 殘留鎖兜底
-                    os.remove(lock_path)
-                    continue
-            except OSError:
-                pass
-            if time.monotonic() > deadline:
-                break  # 等不到鎖:寧可冒險不鎖往下做,也不要永久卡死整輪
-            time.sleep(0.5)
-    try:
-        return fn(*args, **kwargs)
-    finally:
-        if got:
-            try:
-                os.remove(lock_path)
-            except OSError:
-                pass
 
 
 # ─────────────── 極簡 YAML 載入（優先 pyyaml，否則退化解析） ───────────────
@@ -949,7 +916,7 @@ def _run_execute_locked(cfg):
 
     for i in range(1, rt["max_rounds"] + 1):
         rotate_log_if_needed(cfg)
-        with_git_lock(cfg, inspect_and_fix_blank, cfg, log_both)
+        inspect_and_fix_blank(cfg, log_both)
 
         if os.path.exists(control):
             if is_done(cfg, control):
@@ -972,13 +939,13 @@ def _run_execute_locked(cfg):
         rc, killed = run_agent(cmd, cfg)
         if killed:
             hb(f"  Round {i} 被 watchdog 中斷（{killed}），清理後重跑下一輪。")
-            with_git_lock(cfg, git_guard, cfg, i, log_both)
+            git_guard(cfg, i, log_both)
             set_val(control, "last_round_result", "NA")
             set_val(control, "last_round_mode", "中斷")
             time.sleep(rt["interval_seconds"])
             continue
         hb(f"  Round {i} 結束 (rc={rc})")
-        with_git_lock(cfg, git_guard, cfg, i, log_both)
+        git_guard(cfg, i, log_both)
 
         # 讀本輪結果，更新震盪偵測
         phase = get_val(control, "current_phase")

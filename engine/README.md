@@ -28,18 +28,17 @@ python3 <fw>/engine/run.py --stage plan              # 只生成規劃書
 python3 <fw>/engine/run.py --stage execute           # 只執行（gated review 完用這個）
 ```
 
-### 多份需求 / 多個 agent 同時跑
-同一個 code repo 可以有多個 workspace(用 `init-project.py --name` 各開一個,見上層 README)。
-**同時跑多個就是各自開一個 terminal**,分別執行 `run.py --workspace <name>`(或 cd 進不同 repo)即可——
-不需要、也沒有額外的「一鍵啟動全部」腳本。原因：
-- 每個 terminal 原生顯示該 agent 的完整輸出,比把多個程序輸出加前綴混在一起更好讀。
-- 安全機制(下方)跟「誰啟動它」無關,手動開幾個都受保護。
+### 多份需求 / 一次跑一個
+同一個 code repo 可以有多個 workspace(用 `init-project.py --name` 各開一個,見上層 README)——
+這是「把多份需求整理在一起」,**不是**「同時跑」。
 
-並行安全靠 `loop.py` 內建兩種鎖：
-- **Workspace 鎖**(`acquire_run_lock`/`release_run_lock`，鎖檔在 `.loop/<name>/.loop_state/run.lock`)：
-  同一個 workspace 不會被兩個程序同時跑(避免互踩同一份 CONTROL/PLAN/git 狀態)；鎖檔超過 1 小時視為殘留,可自動接手。
-- **Repo 級 git 鎖**(`with_git_lock`，鎖檔在 `.loop/.git.lock`，跨 workspace 共用)：
-  序列化「git add/commit」這幾百毫秒的操作,讓同 repo 內不同 workspace 並行跑時,git 變更不會互相踩到對方半成品。
+⚠️ **本框架不支援在同一個 code repo 同時跑多個 loop。** 原因:loop 會直接改 code repo 的 `src/`,
+兩個 agent 在重疊輪次裡改到同一批檔案,git 層面擋不住「邏輯互蓋」(A 蓋掉 B 的成果)。所以請
+**一次跑一個 workspace**;要換另一份需求,等前一個停了再跑。(真的要物理隔離請各自獨立 clone code repo。)
+
+唯一的鎖是防呆用的 **單一啟動鎖**(`acquire_run_lock`/`release_run_lock`，鎖檔在
+`.loop/<name>/.loop_state/run.lock`)：同一個 workspace 不會被手滑啟動兩次(避免互踩同一份
+CONTROL/PLAN/git 狀態)；鎖檔超過 1 小時視為殘留,可自動接手。這跟並行無關,純粹是冪等保護。
 
 ## loop.py（執行引擎）它做什麼
 反覆觸發 coding agent 跑 `CONTROL.md`，並負責：
@@ -51,7 +50,7 @@ python3 <fw>/engine/run.py --stage execute           # 只執行（gated review 
 - **log rotation**：`loop.log` 超過上限切檔；log 永久保存歷史，但**主控台才是預設的即時觀看方式**(見下)。
 - **console echo**：agent 詳細輸出預設**直接印主控台**，不用另開視窗 `tail -f`；`--quiet`/`LOOP_QUIET=1`/`config.runtime.console_echo: false` 可關閉(寫 log 不受影響)。
 - **preflight 健檢**：啟動先跑 `preflight(cfg, stage)`，錯誤就擋下（見下）。
-- **workspace 鎖 + repo 級 git 鎖**：多 workspace 並行跑的安全機制(見上節)。
+- **單一啟動鎖**：防同一 workspace 被重複啟動(見上節;非並行機制)。
 - **跨專案 index**：結束時 upsert 一行到 `~/.loop/index.md`（`repo + workspace` 為 key；`config.index` 可覆蓋路徑）。
 
 ## plan_loop.py（生成引擎）額外負責
