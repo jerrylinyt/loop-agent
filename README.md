@@ -130,9 +130,10 @@ cascade：**框架預設 < `~/.loop/profile.yaml` < 專案 `.loop/<name>/loop.co
 ## 可靠性機制（兩個引擎共用，code 只讀設定/狀態）
 - **Preflight 健檢**：啟動先檢查佔位模型、`framework_path`、git repo、`build_cmd` 執行檔、REQUIREMENTS/CONTROL 是否存在；有錯誤直接擋下，不會空轉到 max_rounds 才發現設定沒填。
 - **Console echo**：agent 詳細輸出預設**直接印主控台**，不用另開視窗 `tail -f`；同時仍寫進 log 檔。`--quiet`/`LOOP_QUIET=1` 可關閉。
-- **震盪歷史持久化**：失敗指紋存 `.loop/<name>/.loop_state/fail_history`，loop 中斷重啟後接續判斷，不會因重啟而歸零震盪偵測。
+- **震盪歷史持久化**：失敗指紋存 `.loop/<name>/.loop_state/fail_history`，loop 中斷重啟後接續判斷，不會因重啟而歸零震盪偵測。進度/活動標記同樣存 `.loop_state/progress`（跨重啟正確判進展、不誤判卡死）。
+- **無活動逃生門**：除了「不收斂 / 震盪」，引擎還偵測「連續多輪沒提交也沒推進計數器」（反覆被 watchdog 中斷、CLI 逾時、空轉），一樣走三層升級到人類——壞掉的環境不會無聲燒到 `max_rounds` 才停。
 - **獨立 Plan Gate**：規劃書的「生成」與「審查」是兩個獨立 context 的 agent 呼叫（Round A / Round B），審查輪只審不生,避免同一個 agent 自己生、自己審的橡皮圖章問題。
-- **單一啟動鎖**：同一份需求(workspace)不會被手滑啟動兩次(防呆/冪等;非並行機制——同 repo 一次只跑一個,見上節)。
+- **單一啟動鎖（含心跳）**：同一份需求(workspace)不會被手滑啟動兩次(防呆/冪等;非並行機制——同 repo 一次只跑一個,見上節)。鎖檔每輪心跳更新,長跑(超過 1 小時)也不會被誤判成殘留而被第二個程序搶鎖並行。
 - **跨專案總覽**：每次 run 結束自動 upsert 一行到 `~/.loop/index.md`（專案/repo/workspace/phase/stuck/狀態/時間），一人多專案好追蹤。
 
 ## 快速開始

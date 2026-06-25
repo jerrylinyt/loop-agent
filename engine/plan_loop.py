@@ -19,7 +19,8 @@ plan_loop.py — 階段②：規劃書「生成收斂」迴圈（code1）。
 
 兩種模式(config.generation.mode 或 --mode):
   - gated:收斂後停下,印出 review 指示,交人類確認再執行 loop.py。
-  - auto :收斂後直接觸發 engine/loop.py(由 run.py 串接;本檔僅負責階段②並回傳收斂與否)。
+  - auto :收斂後交由 run.py 串接 loop.py。本檔**只負責階段②並回傳收斂與否**,
+          不自己 spawn loop.py(避免持鎖時啟動子程序自鎖死;auto 串接的唯一入口是 run.py)。
 
 狀態落在 .loop/PLAN.md(生成控制檔,文件即狀態);詳細輸出 append 到 .loop/plan.log。
 引擎共用基礎設施 import 自 loop.py(同目錄)。
@@ -29,7 +30,6 @@ import os
 import sys
 import time
 import argparse
-import subprocess
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -120,17 +120,17 @@ def main():
 def _run_plan(cfg, mode_override):
     lock_path = os.path.join(cfg["runtime"]["state_dir"], "run.lock")
     try:
-        L.acquire_run_lock(lock_path)
+        L.acquire_run_lock(lock_path, stale_seconds=L.lock_stale_seconds(cfg))
     except L.WorkspaceBusy as e:
         print(f"✋ {e}", flush=True)
         return 1
     try:
-        return _run_plan_locked(cfg, mode_override)
+        return _run_plan_locked(cfg, mode_override, lock_path)
     finally:
         L.release_run_lock(lock_path)
 
 
-def _run_plan_locked(cfg, mode_override):
+def _run_plan_locked(cfg, mode_override, lock_path=None):
     gen = cfg.get("generation") or {}
     threshold = gen.get("plan_converge_threshold", 2)
     max_rounds = gen.get("max_rounds", 30)
@@ -166,6 +166,8 @@ def _run_plan_locked(cfg, mode_override):
     models = cfg["agent"]["models"]
     for i in range(1, max_rounds + 1):
         L.rotate_log_if_needed(cfg)
+        if lock_path:
+            L.touch_run_lock(lock_path)    # 鎖心跳：長跑時不被誤判殘留而被搶鎖
         if L.get_val(plan_md, "plan_status") == "converged":
             break
         if L.get_val(plan_md, "plan_human_required") == "true":
@@ -254,14 +256,17 @@ def _run_plan_locked(cfg, mode_override):
         log_both(f"⛔ 規劃書未在 {max_rounds} 個 cycle 內收斂,請人工檢視 {plan_md} 與 .loop/。")
         return 1
 
+    # 規劃書已收斂。階段②③ 的串接一律交給 run.py（auto 模式下由 run.py 接 loop.py）——
+    # 本檔不自己 spawn loop.py：避免在仍持有 workspace 鎖時啟動子程序而自鎖死,流程入口也單一化。
+    loop_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
     if mode == "auto":
-        hb("\n▶ mode=auto:規劃書已收斂,接續執行迴圈(loop.py)…")
-        loop_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
-        return subprocess.call([sys.executable, loop_py])
-
-    hb("\n🧑 mode=gated:規劃書已收斂,停下交人類 review。")
-    hb("   review .loop/{loop.config.yaml, CONTROL.md, phases/} 後,執行:")
-    hb(f"   python {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'loop.py')}")
+        hb("\n▶ mode=auto:規劃書已收斂。接續執行請用 run.py（單一入口串接）：")
+        hb(f"   python {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run.py')} --mode auto")
+        hb(f"   （或直接跑 python {loop_py}）")
+    else:
+        hb("\n🧑 mode=gated:規劃書已收斂,停下交人類 review。")
+        hb("   review .loop/{loop.config.yaml, CONTROL.md, phases/} 後,執行:")
+        hb(f"   python {loop_py}")
     return 0
 
 

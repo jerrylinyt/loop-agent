@@ -4,11 +4,14 @@
 > **偵測由外部 loop 引擎做**(它每輪 parse CONTROL + 看 git 改動,最客觀;agent 自己繞圈時往往不自知)。
 > **升級階梯固定三層:預設 → 增強 → 人類。** 門檻與模型指令全來自 `loop.config.yaml`(`oscillation` / `models`)。
 
-## A. 兩種「卡住」與訊號
+## A. 三種「卡住」與訊號
 | 卡法 | 現象 | 偵測訊號 |
 |------|------|----------|
 | **不收斂** | 同一問題一直修不好 | `rounds_since_progress >= stall_threshold`（連續失敗驗證輪沒進展）|
 | **震盪 A↔B** | 每輪都「修好一個」卻原地繞 | 最近 `osc_window` 輪的「失敗指紋」只在 ≤`osc_distinct_max` 種間循環,且有重複 |
+| **無活動(空轉)** | agent 連續多輪沒提交、計數器也沒動(反覆被 watchdog 中斷、CLI 逾時、模型不可用、什麼都沒做) | 「活動簽章」= current_phase + 各 phase consecutive_pass 總和 + HEAD,連續 `stall_threshold` 輪不變;另以獨立 `killed_streak` 防『中斷留半套被 commit 騙過簽章』 |
+
+> 前兩種針對「有在動但卡住」;第三種針對「根本沒在動」——少了它,壞掉的環境(CLI 逾時/空轉)會無聲燒到 `max_rounds` 才停,沒有逃生門。三者任一達門檻都走同一套三層升級。
 
 **失敗指紋(fingerprint)** = `sha1( 排序(last_round_fail_tasks) + "|" + 排序(本輪 git 改動檔案) )`
 - `last_round_fail_tasks`:agent 每輪回填(驗證失敗被打回的任務)。
@@ -19,10 +22,11 @@
 ## B. 三層升級狀態機（外部 loop 執行）
 ```
 Lv0 預設模型（current_model_tier=default, stuck_level=0）
-  每個失敗驗證輪:rounds_since_progress++；PASS 一次就歸零、stuck_level 歸零、換回預設。
-  若 偵測到震盪 或 rounds_since_progress>=stall_threshold:
+  每個失敗驗證輪:rounds_since_progress++；無活動輪:no_activity++；有進展(pass 上升或 phase 推進)就全歸零、換回預設。
+  若 偵測到震盪 或 rounds_since_progress>=stall_threshold 或 no_activity>=stall_threshold:
       → stuck_level=1、current_model_tier=enhanced、enhanced_rounds_used=0
         下一輪改用「增強模型」,並注入 C 的特別提示。
+        (註:「無活動」常是環境壞掉,換模型未必有用,但仍會在 Lv1 試滿後升 Lv2、最終硬性保險停下交人類,不會無聲空轉。)
 
 Lv1 增強模型（current_model_tier=enhanced, stuck_level=1）
   每輪 enhanced_rounds_used++。

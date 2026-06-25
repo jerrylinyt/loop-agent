@@ -210,6 +210,21 @@ def release_run_lock(path):
         pass
 
 
+def touch_run_lock(path):
+    """心跳：把鎖檔 mtime 更新為現在。長跑迴圈每輪呼叫一次,讓『正在跑』的鎖永遠 fresh,
+    避免跑超過 stale_seconds 後被第二個程序誤判成殘留而搶鎖並行（單一啟動鎖的核心修正）。"""
+    try:
+        os.utime(path, None)
+    except OSError:
+        pass
+
+
+def lock_stale_seconds(cfg):
+    """殘留鎖門檻:取『幾個 round_timeout』為基準（搭配心跳,正常跑的鎖不會到此）。"""
+    rt = cfg.get("runtime", {})
+    return max(3600, 3 * int(rt.get("round_timeout_seconds", 1800) or 1800))
+
+
 # ─────────────── 極簡 YAML 載入（優先 pyyaml，否則退化解析） ───────────────
 def _coerce(v):
     s = v.strip()
@@ -466,6 +481,14 @@ def changed_files():
     r = subprocess.run(["git", "diff", "--name-only", "HEAD~1", "HEAD"],
                        capture_output=True, text=True)
     return sorted([x for x in r.stdout.strip().splitlines() if x])
+
+
+def git_head():
+    """目前 HEAD commit hash(無 git/無 commit 回 '')。供『無活動偵測』判斷 agent 本輪有沒有真的提交。"""
+    if not in_git_repo():
+        return ""
+    r = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
 
 
 def expand_control_files(cfg):
@@ -751,6 +774,11 @@ def preflight(cfg, stage):
 
     if not in_git_repo():
         warnings.append("當前目錄不是 git repo（工作區需要 git 安全網；建議 git init）。")
+    else:
+        email = subprocess.run(["git", "config", "user.email"], capture_output=True, text=True)
+        if not email.stdout.strip():
+            warnings.append("git 沒設定 user.email/user.name → 每輪安全 commit 會無聲失敗、失去還原點。"
+                            "請 git config user.email/user.name。")
     if not cfg.get("phases"):
         (errors if stage == "execute" else warnings).append("config 沒有 phases 定義。")
 
@@ -797,6 +825,41 @@ def save_fail_history(cfg, dq):
     os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         f.write("\n".join(dq) + ("\n" if dq else ""))
+
+
+# ─── 進度/活動持久化（跨 phase 正確判進展 + 無活動偵測；重啟接續，不歸零） ───
+def progress_signature(cfg, control):
+    """本輪『活動簽章』= current_phase + 各 phase consecutive_pass 總和 + HEAD commit。
+    連續多輪簽章不變 = agent 沒提交任何東西、計數器也沒動（空轉/反覆被 watchdog 中斷/CLI 壞掉）。"""
+    phase = get_val(control, "current_phase") or ""
+    total_pass = 0
+    for ph in (cfg.get("phases") or []):
+        total_pass += as_int(get_val(control, f"p{ph.get('id')}_consecutive_pass"))
+    return f"{phase}|{total_pass}|{git_head()}"
+
+
+def progress_path(cfg):
+    return os.path.join(cfg["runtime"]["state_dir"], "progress")
+
+
+def load_progress(cfg):
+    data = {}
+    p = progress_path(cfg)
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    data[k.strip()] = v.strip()
+    return data
+
+
+def save_progress(cfg, **kw):
+    p = progress_path(cfg)
+    os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        for k, v in kw.items():
+            f.write(f"{k}: {v}\n")
 
 
 # ─────────────── 跨專案總覽（~/.loop/index.md 自動 upsert） ───────────────
@@ -857,17 +920,17 @@ def main():
 def _run_execute(cfg):
     lock_path = os.path.join(cfg["runtime"]["state_dir"], "run.lock")
     try:
-        acquire_run_lock(lock_path)
+        acquire_run_lock(lock_path, stale_seconds=lock_stale_seconds(cfg))
     except WorkspaceBusy as e:
         print(f"✋ {e}", flush=True)
         return 1
     try:
-        return _run_execute_locked(cfg)
+        return _run_execute_locked(cfg, lock_path)
     finally:
         release_run_lock(lock_path)
 
 
-def _run_execute_locked(cfg):
+def _run_execute_locked(cfg, lock_path=None):
     rt = cfg["runtime"]
     control = cfg["control"]
     osc = cfg["oscillation"]
@@ -912,11 +975,15 @@ def _run_execute_locked(cfg):
     fail_history = load_fail_history(cfg, osc["osc_window"])  # 持久化：重啟接續，不歸零
     if fail_history:
         log_both(f"  ↺ 從 .loop_state 接續震盪歷史（{len(fail_history)} 筆）。")
-    prev_pass = None
+    progress = load_progress(cfg)        # 持久化：跨重啟正確判進展 + 無活動偵測,不歸零
+    if progress:
+        log_both(f"  ↺ 從 .loop_state 接續進度標記（idle={progress.get('idle', '0')}）。")
 
     for i in range(1, rt["max_rounds"] + 1):
         rotate_log_if_needed(cfg)
         inspect_and_fix_blank(cfg, log_both)
+        if lock_path:
+            touch_run_lock(lock_path)    # 鎖心跳：長跑時不被誤判殘留而被搶鎖
 
         if os.path.exists(control):
             if is_done(cfg, control):
@@ -937,24 +1004,37 @@ def _run_execute_locked(cfg):
         log_line(f"\n════════════ Round {i}  ({ts})  tier={tier} model={model} ════════════")
 
         rc, killed = run_agent(cmd, cfg)
+        git_guard(cfg, i, log_both)
         if killed:
             hb(f"  Round {i} 被 watchdog 中斷（{killed}），清理後重跑下一輪。")
-            git_guard(cfg, i, log_both)
             set_val(control, "last_round_result", "NA")
             set_val(control, "last_round_mode", "中斷")
-            time.sleep(rt["interval_seconds"])
-            continue
-        hb(f"  Round {i} 結束 (rc={rc})")
-        git_guard(cfg, i, log_both)
+        else:
+            hb(f"  Round {i} 結束 (rc={rc})")
 
         # 讀本輪結果，更新震盪偵測
         phase = get_val(control, "current_phase")
         cur_pass = as_int(get_val(control, f"p{phase}_consecutive_pass"))
         mode = get_val(control, "last_round_mode") or ""
         result = get_val(control, "last_round_result") or ""
-        progressed = (prev_pass is not None and cur_pass > prev_pass)
 
-        is_fail_verify = ("驗證" in mode) and (result == "FAIL")
+        # 進展判定（跨 phase 正確；prev_* 持久化,重啟也準）
+        prev_phase = progress.get("phase")
+        prev_pass = progress.get("last_pass")
+        phase_advanced = (prev_phase is not None and str(phase) != str(prev_phase))
+        pass_climbed = (prev_pass is not None and cur_pass > as_int(prev_pass))
+        progressed = phase_advanced or pass_climbed
+
+        # 無活動偵測：簽章連續不變 = agent 沒提交、計數器沒動（空轉/反覆中斷/CLI 壞）
+        sig = progress_signature(cfg, control)
+        prev_sig = progress.get("sig")
+        idle_rounds = as_int(progress.get("idle"))
+        idle_rounds = 0 if (prev_sig is None or sig != prev_sig) else idle_rounds + 1
+        # 連續被 watchdog 中斷的輪數（獨立於 git；防『中斷留半套被 commit 而 HEAD 移動』騙過 idle）
+        killed_streak = (as_int(progress.get("killed_streak")) + 1) if killed else 0
+        no_activity = max(idle_rounds, killed_streak)
+
+        is_fail_verify = (not killed) and ("驗證" in mode) and (result == "FAIL")
         stuck_level = as_int(get_val(control, "stuck_level"))
         rounds_since = as_int(get_val(control, "rounds_since_progress"))
         enhanced_used = as_int(get_val(control, "enhanced_rounds_used"))
@@ -974,28 +1054,41 @@ def _run_execute_locked(cfg):
             save_fail_history(cfg, fail_history)
             if stuck_level == 1:
                 enhanced_used += 1
+        elif no_activity and stuck_level == 1:
+            # 無活動但已在增強層 → 也累計增強輪數,免得卡在 Lv1 永不升人類
+            enhanced_used += 1
 
+        # 卡死 = 失敗驗證無進展 / 震盪 / 無任何活動,任一達門檻
         oscillating = detect_oscillation(fail_history, osc["osc_window"], osc["osc_distinct_max"])
-        if stuck_level == 0 and (oscillating or rounds_since >= osc["stall_threshold"]):
+        idle_stalled = no_activity >= osc["stall_threshold"]
+        fail_stalled = rounds_since >= osc["stall_threshold"]
+        if stuck_level == 0 and (oscillating or fail_stalled or idle_stalled):
             stuck_level = 1
             set_val(control, "current_model_tier", "enhanced")
             enhanced_used = 0
-            why = "震盪 A↔B" if oscillating else f"連續 {rounds_since} 輪無進展"
+            why = ("震盪 A↔B" if oscillating
+                   else f"連續 {no_activity} 輪無任何活動（agent 未提交/計數器未動,疑似空轉或 CLI 逾時）"
+                   if idle_stalled else f"連續 {rounds_since} 輪無進展")
             log_both(f"  ⬆ 偵測到卡住（{why}）→ 換【增強模型】重試。")
         elif stuck_level == 1 and enhanced_used >= osc["enhanced_max_rounds"]:
             stuck_level = 2
             log_both(f"  ⬆⬆ 增強模型試了 {enhanced_used} 輪仍卡 → 升級【人類】。"
                      f" 下一輪請 agent 開 BLOCKING Issue 並凍結互卡任務。")
-        elif stuck_level == 2 and rounds_since >= (osc["stall_threshold"] + osc["human_stop_after"]):
-            log_both("  ⛔ 升級人類後仍無進展（硬性保險觸發）→ 停下交人類。")
+        elif stuck_level == 2 and max(rounds_since, no_activity) >= (osc["stall_threshold"] + osc["human_stop_after"]):
+            why = "無任何活動" if no_activity >= rounds_since else "無進展"
+            log_both(f"  ⛔ 升級人類後仍{why}（硬性保險觸發）→ 停下交人類。")
             set_val(control, "stuck_level", "2")
             set_val(control, "rounds_since_progress", str(rounds_since))
+            save_progress(cfg, sig=sig, idle=idle_rounds, killed_streak=killed_streak,
+                          phase=phase, last_pass=cur_pass)
             return 2
 
         set_val(control, "rounds_since_progress", str(rounds_since))
         set_val(control, "stuck_level", str(stuck_level))
         set_val(control, "enhanced_rounds_used", str(enhanced_used))
-        prev_pass = cur_pass
+        progress = {"sig": sig, "idle": idle_rounds, "killed_streak": killed_streak,
+                    "phase": phase, "last_pass": cur_pass}   # 同步記憶體,供下一輪比對
+        save_progress(cfg, **progress)
 
         time.sleep(rt["interval_seconds"])
 
