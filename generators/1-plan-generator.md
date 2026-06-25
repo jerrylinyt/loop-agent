@@ -7,11 +7,12 @@
 > **收斂迴圈行為(每輪務必遵守)**:
 > 1. 若已存在規劃書 → **先不看舊版、從 REQUIREMENTS 獨立重推一份**,再與現有比對。
 > 2. **只在有「實質差異」時才改檔**;無實質差異就不要動檔(讓它穩定下來)。
-> 3. 跑完依 `2-plan-review-gate.md` 自我檢查。
-> 4. 更新 `.loop/PLAN.md`:`plan_gate_last`(PASS/FAIL)、`plan_changed_last`(true=本輪有實質改動/false)。
+> 3. 更新 `PLAN.md`(本 workspace 內,即 `{plan_md}`):`plan_changed_last`(true=本輪有實質改動/false)。
+> 4. ❗**Plan Gate 由獨立的下一輪負責審查**(全新 context,讀 `2-plan-review-gate.md`,只審不生)——
+>    這一輪(生成輪)**不要自己跑 Gate**,以免自己生、自己審的橡皮圖章。
 > 連續達門檻輪「無實質變更且 Gate PASS」→ plan_loop 判定規劃書收斂(gated 停下交人類 / auto 接執行)。
 
-## 你要產出三樣東西（放 code repo 的 .loop/）
+## 你要產出三樣東西（放 code repo 的 .loop/<name>/，即 `{control}` 所在目錄）
 1. **`loop.config.yaml`**（填 `templates/loop.config.template.yaml`）
    - 依需求決定 **phases**(幾個、各 name、spec 檔、output 位置、converge_threshold)。最後一筆=最終階段。
    - 設 `stop_condition`、`oscillation` 門檻、`runtime`(含 context 防爆旋鈕)、`models`(或交給 profile)。
@@ -43,4 +44,5 @@
 - 若是「需求變更回流」而非首次生成:**diff 模式**——只改受影響的 config/CONTROL/phases 段落,不整碗重寫;把受影響任務改 `NEEDS_REVISION`;`plan_version++` 並打 tag `plan-v{n}`。
 
 ## 產出後
-- 跑 `2-plan-review-gate.md` 自檢 → 通過 → 提示人類確認 plan + 看輪數估算 → 才開始階段③(跑引擎)。
+- 不要在這一輪自審。下一輪(獨立 context)會依 `2-plan-review-gate.md` 審查;
+  全過 → 提示人類確認 plan + 看輪數估算 → 才開始階段③(跑引擎)。

@@ -37,13 +37,22 @@ def run_exec():
 
 
 def main():
-    cfg = L.load_config()
-    default_mode = (cfg.get("generation") or {}).get("mode", "gated")
-
     ap = argparse.ArgumentParser(description="Loop Engineering 入口（生成 + 執行）")
-    ap.add_argument("--mode", choices=["gated", "auto"], default=default_mode)
+    ap.add_argument("--mode", choices=["gated", "auto"], default=None,
+                    help="預設取自 config.generation.mode")
     ap.add_argument("--stage", choices=["all", "plan", "execute"], default="all")
+    L.add_common_args(ap)
     args = ap.parse_args()
+
+    # 先解析 workspace/quiet 並寫入 os.environ —— 下面 spawn 的子程序(plan_loop.py/loop.py)
+    # 會自動繼承這個行程的環境變數,藉此把同一個 workspace 帶過去,不需在 argv 額外傳遞。
+    L.apply_quiet_flag(args.quiet)
+    ws = L.resolve_workspace(args.workspace)
+
+    cfg = L.load_config()
+    cfg["_workspace"] = ws
+    if args.mode is None:
+        args.mode = (cfg.get("generation") or {}).get("mode", "gated")
 
     if args.stage == "plan":
         return run_plan("gated")        # 只生成:不論 mode 都不接執行
@@ -64,9 +73,11 @@ def main():
     rc = run_plan("gated")
     if rc != 0:
         return rc
+    ws_dir = os.path.dirname(os.environ.get("LOOP_CONFIG", ".loop/default/loop.config.yaml"))
+    ws_flag = f" --workspace {ws}" if ws != "default" else ""
     print("\n🧑 mode=gated:規劃書已收斂,停下交人類 review。")
-    print("   review .loop/{loop.config.yaml, CONTROL.md, phases/} 後,執行:")
-    print(f"   python {os.path.join(HERE, 'run.py')} --stage execute")
+    print(f"   review {ws_dir}/{{loop.config.yaml, CONTROL.md, phases/}} 後,執行:")
+    print(f"   python {os.path.join(HERE, 'run.py')} --stage execute{ws_flag}")
     return 0
 
 

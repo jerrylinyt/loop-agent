@@ -1,14 +1,15 @@
-# loop.config.yaml — 專案設定區（階段②生成；放在 code repo 的 .loop/ 內）
+# loop.config.yaml — 專案設定區（階段②生成；放在 code repo 的 .loop/<workspace>/ 內）
 # cascade：框架預設 < ~/.loop/profile.yaml < 本檔 < 環境變數
 # 只放「設定」（門檻/階段/模型/路徑）；「活計數器」放 CONTROL.md（見 rules/state-model.md）
-# ⚠️ 引擎從「code repo 根目錄」執行（產出落在 repo 根；控制檔在 .loop/）。路徑皆相對 repo 根。
+# ⚠️ 引擎從「code repo 根目錄」執行（產出落在 repo 根；控制檔在 .loop/<workspace>/）。路徑皆相對 repo 根。
+# {{LOOP_DIR}} 由 init-project.py 替換成 .loop/<workspace 名稱>（多份需求並存的關鍵：見 README 多 workspace）。
 
 framework_path: ~/.loop/framework            # 外部共享、唯讀的框架 clone（不進 code repo）
 profile: ~/.loop/profile.yaml                # 使用者定義區（模型/CLI/風格/門檻預設）
 # index: ~/.loop/index.md                    # 跨專案總覽（自動 upsert，預設即此路徑，通常不需覆蓋）
 
-control: .loop/CONTROL.md
-control_files: [.loop/CONTROL.md, ".loop/phases/*.md"]   # git 守護「整檔被清空」兜底對象（支援 glob）
+control: {{LOOP_DIR}}/CONTROL.md
+control_files: [{{LOOP_DIR}}/CONTROL.md, "{{LOOP_DIR}}/phases/*.md"]   # git 守護「整檔被清空」兜底對象（支援 glob）
 
 # ── 工作區拓撲（見 rules 與 REFACTOR_PLAN §3.3）──
 workspace:
@@ -17,16 +18,17 @@ workspace:
 # ── 生成階段（階段②：plan_loop.py 跑規劃書收斂；見 generators/）──
 generation:
   mode: gated                                # gated（收斂後停下交人類 review）| auto（收斂後自動接執行迴圈）
-  plan_converge_threshold: 2                 # 連續幾輪「無實質變更且 Plan Gate PASS」才算規劃書收斂
+  plan_converge_threshold: 3                 # 連續幾個 cycle「無實質變更且 Plan Gate PASS」才算規劃書收斂
   max_rounds: 30
   interval_seconds: 10
-  log_file: ./.loop/plan.log
+  log_file: ./{{LOOP_DIR}}/plan.log
 
 # ── 階段定義（幾個、叫什麼、產出去哪、收斂門檻）；is_done/PhaseGate 全依此 ──
-# 最後一筆 = 最終階段。階段數由專案決定（不限 2）。output 相對 repo 根（程式碼落 src/；分析可落 .loop/docs/）。
+# 最後一筆 = 最終階段。階段數由專案決定（不限 2）。output 相對 repo 根（程式碼落 src/，跨 workspace 共用；
+# 分析文件落 {{LOOP_DIR}}/docs/，每個 workspace 各自獨立，避免多份需求互相覆蓋）。
 phases:
-  - { id: 1, name: 階段一, spec: .loop/phases/PHASE1.md, output: .loop/docs/, converge_threshold: 2 }
-  - { id: 2, name: 階段二, spec: .loop/phases/PHASE2.md, output: src/, converge_threshold: 2 }
+  - { id: 1, name: 階段一, spec: {{LOOP_DIR}}/phases/PHASE1.md, output: {{LOOP_DIR}}/docs/, converge_threshold: 2 }
+  - { id: 2, name: 階段二, spec: {{LOOP_DIR}}/phases/PHASE2.md, output: src/, converge_threshold: 2 }
 
 # ── 停止條件（取代寫死的 phase==2）──
 stop_condition:
@@ -40,7 +42,7 @@ stop_condition:
 extra_thresholds:
   page_converge: 3
 
-# ── 震盪 / 升級門檻 ──
+# ── 震盪 / 升級門檻（plan_loop.py 與 loop.py 共用同一組）──
 oscillation:
   stall_threshold: 6
   osc_window: 8
@@ -51,21 +53,22 @@ oscillation:
 # ── 執行 / 逾時 / context 防爆 ──
 runtime:
   max_rounds: 600
-  interval_seconds: 30
+  interval_seconds: 10
   round_timeout_seconds: 1800
-  idle_timeout_seconds: 300
-  control_min_bytes: 200
-  log_file: ./.loop/loop.log
-  state_dir: ./.loop/.loop_state
+  idle_timeout_seconds: 900
+  control_min_bytes: 5
+  log_file: ./{{LOOP_DIR}}/loop.log
+  state_dir: ./{{LOOP_DIR}}/.loop_state
   log_rotate_max_mb: 50
   log_rotate_keep: 5
   journal_in_control_keep: 1
   control_max_bytes: 60000
+  console_echo: true                         # agent 詳細輸出直接印主控台（不用另開視窗 tail -f）；--quiet 或 LOOP_QUIET=1 關閉
 
 # ── Agent 指令與提示（全抽成設定；code 只讀這裡）──
 # 建議把 build_cmd / models / extra_args 放 ~/.loop/profile.yaml 全機共用；這裡只覆蓋專案獨有的。
 agent:
-  build_cmd: "codex e --model {model} {prompt}"   # {model}/{prompt} 帶入；可加 {args} 佔位插入 extra_args
+  build_cmd: "opencode run -m {model} {prompt}"   # {model}/{prompt} 帶入；可加 {args} 佔位插入 extra_args
   extra_args: []                                  # 額外固定 CLI 參數（如 ["--yolo"]）；無 {args} 佔位則接在 prompt 前
   models:
     default: "<你的預設模型>"

@@ -30,6 +30,8 @@ import signal
 import shlex
 import shutil
 import hashlib
+import argparse
+import threading
 import subprocess
 from collections import deque, Counter
 from datetime import datetime
@@ -83,6 +85,7 @@ DEFAULTS = {
         "log_rotate_keep": 5,
         "journal_in_control_keep": 1,
         "control_max_bytes": 60000,
+        "console_echo": True,            # 直接把 agent 詳細輸出印到主控台（不用另開視窗 tail -f）；LOOP_QUIET=1 可關
     },
     # ── Agent 指令與提示（全抽成設定；code 只讀這裡，不寫死）──
     "agent": {
@@ -141,6 +144,103 @@ def fmt_prompt(template, **kw):
     for k, v in kw.items():
         out = out.replace("{" + k + "}", str(v))
     return out
+
+
+# ─────────────── 多 workspace 支援（同一 code repo 內帶多份需求） ───────────────
+def add_common_args(ap):
+    """三支引擎共用的 CLI 參數：--workspace 選 .loop/<name>/、--quiet 關閉主控台直接輸出。"""
+    ap.add_argument("--workspace", "-w", default=None,
+                    help="選擇 .loop/<name>/ 這個 workspace（同 repo 帶多份需求時用；預設 default 或 $LOOP_WORKSPACE）")
+    ap.add_argument("--quiet", "-q", action="store_true",
+                    help="關閉主控台直接輸出 agent 詳細內容（仍會寫進 log 檔）；等同 LOOP_QUIET=1")
+    return ap
+
+
+def resolve_workspace(explicit=None):
+    """決定本次跑哪個 workspace,並把 LOOP_CONFIG 設成 .loop/<name>/loop.config.yaml。
+    若 LOOP_CONFIG 已被明確設定(進階用法/單一 workspace 舊式佈局),尊重之、不覆蓋。
+    回傳 workspace name(供 lock 路徑、console 訊息使用)。"""
+    name = explicit or os.environ.get("LOOP_WORKSPACE") or "default"
+    if "LOOP_CONFIG" not in os.environ:
+        os.environ["LOOP_CONFIG"] = os.path.join(".loop", name, "loop.config.yaml")
+    return name
+
+
+def apply_quiet_flag(quiet):
+    if quiet:
+        os.environ["LOOP_QUIET"] = "1"
+
+
+def console_echo_enabled(cfg):
+    if os.environ.get("LOOP_QUIET") == "1":
+        return False
+    return bool(cfg.get("runtime", {}).get("console_echo", True))
+
+
+# ─────────────── 檔案鎖（同一 workspace 防重複啟動；同 repo 跨 workspace 序列化 git 操作） ───────────────
+class WorkspaceBusy(Exception):
+    pass
+
+
+def acquire_run_lock(path, stale_seconds=3600):
+    """獨佔鎖:同一 workspace 不可被兩個引擎程序同時跑(避免互踩 CONTROL/PLAN/git)。
+    鎖檔超過 stale_seconds 視為前次異常結束留下的殘留,允許強制取得(不做跨平台 PID 存活檢查)。"""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if os.path.exists(path):
+        age = time.time() - os.path.getmtime(path)
+        if age < stale_seconds:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    info = f.read().strip()
+            except OSError:
+                info = "?"
+            raise WorkspaceBusy(
+                f"此 workspace 已有執行中的程序佔用({info}；lock 存在 {int(age)}s)。"
+                f"確定沒有其他程序在跑的話,刪除 {path} 後重試。")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"pid={os.getpid()} started={datetime.now():%F %T}")
+    return path
+
+
+def release_run_lock(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def with_git_lock(cfg, fn, *args, timeout=30, **kwargs):
+    """短暫獨佔鎖,序列化「git 變更工作區」的操作(git_guard/inspect_and_fix_blank)。
+    鎖是 repo 層級(放 .loop/.git.lock,跨 workspace 共用),讓同一 repo 內多個 workspace
+    並行跑時,git add/commit 不會互相踩到對方半成品。鎖只在做 git 操作這幾百毫秒內持有。"""
+    lock_path = os.path.join(".loop", ".git.lock")
+    os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
+    deadline = time.monotonic() + timeout
+    got = False
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            got = True
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(lock_path) > 120:  # 殘留鎖兜底
+                    os.remove(lock_path)
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() > deadline:
+                break  # 等不到鎖:寧可冒險不鎖往下做,也不要永久卡死整輪
+            time.sleep(0.5)
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        if got:
+            try:
+                os.remove(lock_path)
+            except OSError:
+                pass
 
 
 # ─────────────── 極簡 YAML 載入（優先 pyyaml，否則退化解析） ───────────────
@@ -522,13 +622,14 @@ def run_agent(cmd, cfg):
     round_timeout = rt["round_timeout_seconds"]
     idle_timeout = rt["idle_timeout_seconds"]
     log_path = rt["log_file"]
+    echo = console_echo_enabled(cfg)
 
     if HAVE_PTY:
-        return _run_agent_pty(cmd, log_path, round_timeout, idle_timeout)
-    return _run_agent_pipe(cmd, log_path, round_timeout, idle_timeout)
+        return _run_agent_pty(cmd, log_path, round_timeout, idle_timeout, echo)
+    return _run_agent_pipe(cmd, log_path, round_timeout, idle_timeout, echo)
 
 
-def _run_agent_pty(cmd, log_path, round_timeout, idle_timeout):
+def _run_agent_pty(cmd, log_path, round_timeout, idle_timeout, echo=True):
     log = open(log_path, "ab")
     pid, fd = pty.fork()
     if pid == 0:
@@ -571,6 +672,9 @@ def _run_agent_pty(cmd, log_path, round_timeout, idle_timeout):
                 if data:
                     log.write(data)
                     log.flush()
+                    if echo:
+                        sys.stdout.buffer.write(data)
+                        sys.stdout.flush()
                     last_output = now
             if round_timeout and (now - start) > round_timeout:
                 killed = "timeout"
@@ -597,28 +701,49 @@ def _run_agent_pty(cmd, log_path, round_timeout, idle_timeout):
     return rc, killed
 
 
-def _run_agent_pipe(cmd, log_path, round_timeout, idle_timeout):
-    """無 pty 後備（Windows）：行緩衝可能較差，但功能完整。"""
-    killed = None
-    with open(log_path, "ab") as log:
+def _run_agent_pipe(cmd, log_path, round_timeout, idle_timeout, echo=True):
+    """無 pty 後備（Windows）：用背景執行緒讀取子程序輸出,同時寫 log 與(可選)主控台,
+    並精準量測閒置時間(取代舊版用 log 檔 mtime 推估的近似值)。"""
+    log = open(log_path, "ab")
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+    except FileNotFoundError:
+        log.write(f"找不到指令：{cmd[0]}\n".encode())
+        log.close()
+        return 127, None
+
+    state = {"last": time.monotonic()}
+
+    def reader():
         try:
-            proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
-        except FileNotFoundError:
-            log.write(f"找不到指令：{cmd[0]}\n".encode())
-            return 127, None
-        start = time.monotonic()
+            while True:
+                chunk = proc.stdout.read(4096)
+                if not chunk:
+                    break
+                log.write(chunk)
+                log.flush()
+                if echo:
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.flush()
+                state["last"] = time.monotonic()
+        except (OSError, ValueError):
+            pass
+
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+
+    killed = None
+    start = time.monotonic()
+    try:
         while True:
             rc = proc.poll()
             if rc is not None:
+                t.join(timeout=2)
                 return rc, None
             now = time.monotonic()
-            try:
-                size_idle = (now - os.path.getmtime(log_path))
-            except OSError:
-                size_idle = 0
             if round_timeout and (now - start) > round_timeout:
                 killed = "timeout"
-            elif idle_timeout and size_idle > idle_timeout:
+            elif idle_timeout and (now - state["last"]) > idle_timeout:
                 killed = "idle"
             if killed:
                 proc.terminate()
@@ -626,8 +751,11 @@ def _run_agent_pipe(cmd, log_path, round_timeout, idle_timeout):
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+                t.join(timeout=2)
                 return (proc.returncode if proc.returncode is not None else -1), killed
             time.sleep(1.0)
+    finally:
+        log.close()
 
 
 # ─────────────── 開跑前健檢（preflight） ───────────────
@@ -706,21 +834,24 @@ def save_fail_history(cfg, dq):
 
 # ─────────────── 跨專案總覽（~/.loop/index.md 自動 upsert） ───────────────
 def update_index(cfg, status):
-    """以工作區絕對路徑為 key,upsert 一行到 index。context-cheap:只存索引,不存內文。"""
+    """以(repo 絕對路徑, workspace 名稱)為 key,upsert 一行到 index。
+    context-cheap:只存索引,不存內文。同一 repo 可有多個 workspace(多份需求)各佔一行。"""
     try:
         idx = os.path.expanduser(cfg.get("index") or "~/.loop/index.md")
         os.makedirs(os.path.dirname(idx) or ".", exist_ok=True)
         repo = os.path.abspath(".")
         name = os.path.basename(repo)
+        ws = cfg.get("_workspace") or "-"
         control = cfg.get("control", "")
         has_ctl = bool(control) and os.path.exists(control)
         phase = get_val(control, "current_phase") if has_ctl else "-"
         stuck = get_val(control, "stuck_level") if has_ctl else "-"
         ts = datetime.now().strftime("%F %T")
-        row = f"| {name} | {repo} | {phase or '-'} | {stuck or '-'} | {status} | {ts} |"
+        key = f"| {repo} | {ws} |"
+        row = f"| {name} | {repo} | {ws} | {phase or '-'} | {stuck or '-'} | {status} | {ts} |"
         header = ["# Loop 專案總覽（自動維護）", "",
-                  "| 專案 | repo | phase | stuck | 狀態 | 更新 |",
-                  "|------|------|-------|-------|------|------|"]
+                  "| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |",
+                  "|------|------|-----------|-------|-------|------|------|"]
         body = []
         if os.path.exists(idx):
             with open(idx, encoding="utf-8") as f:
@@ -730,8 +861,8 @@ def update_index(cfg, status):
                         continue
                     if line.startswith("| 專案 ") or set(line) <= set("|-: "):
                         continue
-                    if f"| {repo} |" in line:
-                        continue  # 移除同專案舊行
+                    if key in line:
+                        continue  # 移除同 (repo, workspace) 舊行
                     body.append(line)
         body.append(row)
         with open(idx, "w", encoding="utf-8") as f:
@@ -742,7 +873,14 @@ def update_index(cfg, status):
 
 # ─────────────── 主迴圈 ───────────────
 def main():
+    ap = argparse.ArgumentParser(description="階段③:執行收斂迴圈")
+    add_common_args(ap)
+    args = ap.parse_args()
+    apply_quiet_flag(args.quiet)
+    ws = resolve_workspace(args.workspace)
+
     cfg = load_config()
+    cfg["_workspace"] = ws
     rc = _run_execute(cfg)
     status = {0: "done", 1: "stopped", 2: "human_required"}.get(rc, "stopped")
     update_index(cfg, status)
@@ -750,6 +888,19 @@ def main():
 
 
 def _run_execute(cfg):
+    lock_path = os.path.join(cfg["runtime"]["state_dir"], "run.lock")
+    try:
+        acquire_run_lock(lock_path)
+    except WorkspaceBusy as e:
+        print(f"✋ {e}", flush=True)
+        return 1
+    try:
+        return _run_execute_locked(cfg)
+    finally:
+        release_run_lock(lock_path)
+
+
+def _run_execute_locked(cfg):
     rt = cfg["runtime"]
     control = cfg["control"]
     osc = cfg["oscillation"]
@@ -798,7 +949,7 @@ def _run_execute(cfg):
 
     for i in range(1, rt["max_rounds"] + 1):
         rotate_log_if_needed(cfg)
-        inspect_and_fix_blank(cfg, log_both)
+        with_git_lock(cfg, inspect_and_fix_blank, cfg, log_both)
 
         if os.path.exists(control):
             if is_done(cfg, control):
@@ -821,13 +972,13 @@ def _run_execute(cfg):
         rc, killed = run_agent(cmd, cfg)
         if killed:
             hb(f"  Round {i} 被 watchdog 中斷（{killed}），清理後重跑下一輪。")
-            git_guard(cfg, i, log_both)
+            with_git_lock(cfg, git_guard, cfg, i, log_both)
             set_val(control, "last_round_result", "NA")
             set_val(control, "last_round_mode", "中斷")
             time.sleep(rt["interval_seconds"])
             continue
         hb(f"  Round {i} 結束 (rc={rc})")
-        git_guard(cfg, i, log_both)
+        with_git_lock(cfg, git_guard, cfg, i, log_both)
 
         # 讀本輪結果，更新震盪偵測
         phase = get_val(control, "current_phase")

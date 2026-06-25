@@ -104,9 +104,13 @@ def main():
     ap = argparse.ArgumentParser(description="階段②:規劃書生成收斂迴圈")
     ap.add_argument("--mode", choices=["gated", "auto"], default=None,
                     help="覆蓋 config.generation.mode")
+    L.add_common_args(ap)
     args = ap.parse_args()
+    L.apply_quiet_flag(args.quiet)
+    ws = L.resolve_workspace(args.workspace)
 
     cfg = L.load_config()
+    cfg["_workspace"] = ws
     rc = _run_plan(cfg, args.mode)
     status = {0: "plan_proceeding", 1: "plan_stopped", 2: "plan_human_required"}.get(rc, "plan_stopped")
     L.update_index(cfg, status)
@@ -114,6 +118,19 @@ def main():
 
 
 def _run_plan(cfg, mode_override):
+    lock_path = os.path.join(cfg["runtime"]["state_dir"], "run.lock")
+    try:
+        L.acquire_run_lock(lock_path)
+    except L.WorkspaceBusy as e:
+        print(f"✋ {e}", flush=True)
+        return 1
+    try:
+        return _run_plan_locked(cfg, mode_override)
+    finally:
+        L.release_run_lock(lock_path)
+
+
+def _run_plan_locked(cfg, mode_override):
     gen = cfg.get("generation") or {}
     threshold = gen.get("plan_converge_threshold", 2)
     max_rounds = gen.get("max_rounds", 30)
@@ -166,10 +183,10 @@ def _run_plan(cfg, mode_override):
         rc, killed = L.run_agent(cmd, cfg)
         if killed:
             hb(f"  Round A 被 watchdog 中斷（{killed}），清理後重跑下一個 cycle。")
-            L.git_guard(cfg, i, log_both)
+            L.with_git_lock(cfg, L.git_guard, cfg, i, log_both)
             time.sleep(interval)
             continue
-        L.git_guard(cfg, i, log_both)
+        L.with_git_lock(cfg, L.git_guard, cfg, i, log_both)
 
         changed = plan_files_changed(cfg)
         if changed is None:  # 無 git → 用 agent 回填
@@ -183,10 +200,10 @@ def _run_plan(cfg, mode_override):
         rc, killed = L.run_agent(cmd, cfg)
         if killed:
             hb(f"  Round B 被 watchdog 中斷（{killed}），本 cycle 視為無進展。")
-            L.git_guard(cfg, i, log_both)
+            L.with_git_lock(cfg, L.git_guard, cfg, i, log_both)
             gate = None
         else:
-            L.git_guard(cfg, i, log_both)
+            L.with_git_lock(cfg, L.git_guard, cfg, i, log_both)
             gate = L.get_val(plan_md, "plan_gate_last")
 
         stable = (not changed) and (gate == "PASS")
