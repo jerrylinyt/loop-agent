@@ -1,7 +1,15 @@
 # 🏗️ GENERATOR — 階段②：生成規劃書（config + CONTROL + phases）
 
-> **怎麼用**:輸入 `REQUIREMENTS.md`(已人類確認)+ `rules/BLUEPRINT.md`,**產出這個專案專屬的規劃書**。產完跑 `2-plan-review-gate.md` 的檢查,**人類確認 plan**後才開始執行(階段③)。
+> **怎麼用**:這份是**每輪的指令**,由 `engine/plan_loop.py` 反覆觸發(規劃書本身是收斂目標)。
+> 輸入 `REQUIREMENTS.md`(已人類確認)+ `rules/BLUEPRINT.md`,**產出這個專案專屬的規劃書**。
 > 階段數、任務、收斂門檻、停止條件**全部在這一段生出來**,不預設幾個階段。
+>
+> **收斂迴圈行為(每輪務必遵守)**:
+> 1. 若已存在規劃書 → **先不看舊版、從 REQUIREMENTS 獨立重推一份**,再與現有比對。
+> 2. **只在有「實質差異」時才改檔**;無實質差異就不要動檔(讓它穩定下來)。
+> 3. 跑完依 `2-plan-review-gate.md` 自我檢查。
+> 4. 更新 `.loop/PLAN.md`:`plan_gate_last`(PASS/FAIL)、`plan_changed_last`(true=本輪有實質改動/false)。
+> 連續達門檻輪「無實質變更且 Gate PASS」→ plan_loop 判定規劃書收斂(gated 停下交人類 / auto 接執行)。
 
 ## 你要產出三樣東西（放 code repo 的 .loop/）
 1. **`loop.config.yaml`**（填 `templates/loop.config.template.yaml`）

@@ -78,7 +78,8 @@ def main(argv):
 
     # 4) .gitignore（補 loop 產物）
     gi = os.path.join(repo, ".gitignore")
-    needed = [".loop/loop.log", ".loop/.loop_state/", ".loop/loop.log.*"]
+    needed = [".loop/loop.log", ".loop/loop.log.*",
+              ".loop/plan.log", ".loop/plan.log.*", ".loop/.loop_state/"]
     existing = ""
     if os.path.exists(gi):
         with open(gi, encoding="utf-8") as f:
@@ -89,12 +90,15 @@ def main(argv):
             f.write("\n# Loop Engineering 產物\n" + "\n".join(add) + "\n")
         print(f"  ~ 補 .gitignore：{', '.join(add)}")
 
-    print("\n✅ 初始化完成。下一步：")
-    print(f"  ① 需求訪談：把 {FRAMEWORK}/generators/0-requirements-interview.md")
-    print(f"     交給 agent，產出 .loop/REQUIREMENTS.md（人類確認）。")
-    print(f"  ② 生成規劃書：用 generators/1-plan-generator.md 產 CONTROL.md + phases/ + 補完 loop.config.yaml，")
-    print(f"     再跑 generators/2-plan-review-gate.md 過關。")
-    print(f"  ③ 執行：cd {loop_dir} && python3 {FRAMEWORK}/engine/loop.py")
+    print("\n✅ 初始化完成。下一步（都在 code repo 根目錄執行）：")
+    print(f"  ① 需求：編輯 .loop/REQUIREMENTS.md（人類直接寫完整需求），")
+    print(f"     或把 {FRAMEWORK}/generators/0-requirements-interview.md 交給 agent 互動訪談產出。")
+    print(f"  ②③ 一鍵跑（依 config.generation.mode）：")
+    print(f"     python {FRAMEWORK}/engine/run.py")
+    print(f"     · gated（預設）：生成規劃書收斂 → 停下交你 review → 你確認後：")
+    print(f"       python {FRAMEWORK}/engine/run.py --stage execute")
+    print(f"     · auto：python {FRAMEWORK}/engine/run.py --mode auto（生成收斂後自動接執行）")
+    print(f"  詳細輸出：tail -f .loop/plan.log（生成階段）/ .loop/loop.log（執行階段）")
     return 0
 
 

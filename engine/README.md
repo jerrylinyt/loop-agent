@@ -1,8 +1,25 @@
-# engine — 通用 Loop Engineering 執行引擎（Python）
+# engine — 通用 Loop Engineering 引擎（Python）
 
-`loop.py` 是唯一的執行引擎（單一事實來源，不再維護 bash 版）。
+三支腳本（純 Python，不維護 bash 版）：
 
-## 它做什麼
+| 腳本 | 階段 | 做什麼 |
+|------|------|--------|
+| `plan_loop.py` | ② 生成 | 反覆觸發 agent 從 REQUIREMENTS 獨立(重)推導規劃書，直到「連續 N 輪無實質變更且 Plan Gate PASS」→ 規劃書收斂。狀態落 `.loop/PLAN.md`，log 落 `.loop/plan.log`。 |
+| `loop.py` | ③ 執行 | 反覆觸發 agent 依規劃書執行，直到最終結果收斂或交人類。狀態在 `.loop/CONTROL.md`，log 落 `.loop/loop.log`。 |
+| `run.py` | 入口 | 串接 ②③，提供 `--mode gated\|auto`、`--stage all\|plan\|execute`。 |
+
+> `plan_loop.py` / `run.py` 都 import `loop.py` 當共用函式庫（config cascade、run_agent、git 守護、log rotation 等單一事實來源）。
+> **所有腳本從 code repo 根目錄執行**（產出落 repo 根、控制檔在 `.loop/`）。
+
+## run.py（建議入口）
+```bash
+python3 <fw>/engine/run.py                 # 依 config.generation.mode（預設 gated）
+python3 <fw>/engine/run.py --mode auto     # 生成收斂後自動接執行
+python3 <fw>/engine/run.py --stage plan    # 只生成規劃書
+python3 <fw>/engine/run.py --stage execute # 只執行（gated review 完用這個）
+```
+
+## loop.py（執行引擎）它做什麼
 反覆觸發 coding agent 跑 `CONTROL.md`，並負責：
 - **config cascade**：框架預設 < `~/.loop/profile.yaml` < 專案 `.loop/loop.config.yaml` < 環境變數。
 - **N 階段流程控制**：停止條件、Phase Gate 全依 `config.phases`（最後一筆=最終階段），不寫死階段數。

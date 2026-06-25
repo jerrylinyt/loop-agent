@@ -1,22 +1,31 @@
 # loop.config.yaml — 專案設定區（階段②生成；放在 code repo 的 .loop/ 內）
 # cascade：框架預設 < ~/.loop/profile.yaml < 本檔 < 環境變數
 # 只放「設定」（門檻/階段/模型/路徑）；「活計數器」放 CONTROL.md（見 rules/state-model.md）
+# ⚠️ 引擎從「code repo 根目錄」執行（產出落在 repo 根；控制檔在 .loop/）。路徑皆相對 repo 根。
 
 framework_path: ~/.loop/framework            # 外部共享、唯讀的框架 clone（不進 code repo）
 profile: ~/.loop/profile.yaml                # 使用者定義區（模型/CLI/風格/門檻預設）
 
-control: CONTROL.md
-control_files: [CONTROL.md, "phases/*.md"]   # git 守護「整檔被清空」兜底對象（支援 glob）
+control: .loop/CONTROL.md
+control_files: [.loop/CONTROL.md, ".loop/phases/*.md"]   # git 守護「整檔被清空」兜底對象（支援 glob）
 
 # ── 工作區拓撲（見 rules 與 REFACTOR_PLAN §3.3）──
 workspace:
   mode: in_repo                              # in_repo | branch | sidecar
 
+# ── 生成階段（階段②：plan_loop.py 跑規劃書收斂；見 generators/）──
+generation:
+  mode: gated                                # gated（收斂後停下交人類 review）| auto（收斂後自動接執行迴圈）
+  plan_converge_threshold: 2                 # 連續幾輪「無實質變更且 Plan Gate PASS」才算規劃書收斂
+  max_rounds: 30
+  interval_seconds: 10
+  log_file: ./.loop/plan.log
+
 # ── 階段定義（幾個、叫什麼、產出去哪、收斂門檻）；is_done/PhaseGate 全依此 ──
-# 最後一筆 = 最終階段。階段數由專案決定（不限 2）。
+# 最後一筆 = 最終階段。階段數由專案決定（不限 2）。output 相對 repo 根（程式碼落 src/；分析可落 .loop/docs/）。
 phases:
-  - { id: 1, name: 階段一, spec: phases/PHASE1.md, output: docs/, converge_threshold: 2 }
-  - { id: 2, name: 階段二, spec: phases/PHASE2.md, output: src/, converge_threshold: 2 }
+  - { id: 1, name: 階段一, spec: .loop/phases/PHASE1.md, output: .loop/docs/, converge_threshold: 2 }
+  - { id: 2, name: 階段二, spec: .loop/phases/PHASE2.md, output: src/, converge_threshold: 2 }
 
 # ── 停止條件（取代寫死的 phase==2）──
 stop_condition:
@@ -45,8 +54,8 @@ runtime:
   round_timeout_seconds: 1800
   idle_timeout_seconds: 300
   control_min_bytes: 200
-  log_file: ./loop.log
-  state_dir: ./.loop_state
+  log_file: ./.loop/loop.log
+  state_dir: ./.loop/.loop_state
   log_rotate_max_mb: 50
   log_rotate_keep: 5
   journal_in_control_keep: 1
