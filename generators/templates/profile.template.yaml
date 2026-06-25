@@ -1,0 +1,22 @@
+# ~/.loop/profile.yaml — 使用者定義區（per-user，跨專案共用）
+# cascade 中層：框架預設 < 本檔 < 專案 .loop/loop.config.yaml < 環境變數
+# 放「屬於你這個人、不該每專案重生」的東西；專案 config 只覆蓋真正獨有的少數值。
+
+# 你慣用的三層模型指令（{model}/{prompt} 帶入）。設一次，全機專案共用。
+models:
+  default: "<你的預設模型>"
+  enhanced: "<你的增強模型>"
+  build_cmd: "codex e --model {model} {prompt}"
+
+# 你慣用的門檻預設（可被專案 config 覆蓋）
+oscillation:
+  stall_threshold: 6
+  enhanced_max_rounds: 8
+
+# 你的 coding 標準 / 風格（生成器產 phases、agent 寫產出時遵循；自由文字）
+style: |
+  - commit 訊息格式：R### | phase{n} | TASK-## | 推進/驗證 | 摘要
+  - <命名慣例 / 排版 / 註解密度 …>
+
+# 卡死要通知誰 / 怎麼通知（自由文字，供 agent/你參考）
+notify: "<email / 其他>"

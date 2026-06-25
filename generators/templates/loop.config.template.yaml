@@ -1,0 +1,59 @@
+# loop.config.yaml — 專案設定區（階段②生成；放在 code repo 的 .loop/ 內）
+# cascade：框架預設 < ~/.loop/profile.yaml < 本檔 < 環境變數
+# 只放「設定」（門檻/階段/模型/路徑）；「活計數器」放 CONTROL.md（見 rules/state-model.md）
+
+framework_path: ~/.loop/framework            # 外部共享、唯讀的框架 clone（不進 code repo）
+profile: ~/.loop/profile.yaml                # 使用者定義區（模型/CLI/風格/門檻預設）
+
+control: CONTROL.md
+control_files: [CONTROL.md, "phases/*.md"]   # git 守護「整檔被清空」兜底對象（支援 glob）
+
+# ── 工作區拓撲（見 rules 與 REFACTOR_PLAN §3.3）──
+workspace:
+  mode: in_repo                              # in_repo | branch | sidecar
+
+# ── 階段定義（幾個、叫什麼、產出去哪、收斂門檻）；is_done/PhaseGate 全依此 ──
+# 最後一筆 = 最終階段。階段數由專案決定（不限 2）。
+phases:
+  - { id: 1, name: 階段一, spec: phases/PHASE1.md, output: docs/, converge_threshold: 2 }
+  - { id: 2, name: 階段二, spec: phases/PHASE2.md, output: src/, converge_threshold: 2 }
+
+# ── 停止條件（取代寫死的 phase==2）──
+stop_condition:
+  final_phase_pass_gte: 10
+  blocking_field: blocking_issues
+  blocking_eq: 0
+  done_flag: stop_condition_met
+  human_flag: human_required
+
+# ── 進階收斂門檻（非每專案都有；生成器按需加）──
+extra_thresholds:
+  page_converge: 3
+
+# ── 震盪 / 升級門檻 ──
+oscillation:
+  stall_threshold: 6
+  osc_window: 8
+  osc_distinct_max: 3
+  enhanced_max_rounds: 8
+  human_stop_after: 4
+
+# ── 執行 / 逾時 / context 防爆 ──
+runtime:
+  max_rounds: 600
+  interval_seconds: 30
+  round_timeout_seconds: 1800
+  idle_timeout_seconds: 300
+  control_min_bytes: 200
+  log_file: ./loop.log
+  state_dir: ./.loop_state
+  log_rotate_max_mb: 50
+  log_rotate_keep: 5
+  journal_in_control_keep: 1
+  control_max_bytes: 60000
+
+# ── 三層模型指令（{model}/{prompt} 帶入；建議放 ~/.loop/profile.yaml 全機共用）──
+models:
+  default: "<你的預設模型>"
+  enhanced: "<你的增強模型>"
+  build_cmd: "codex e --model {model} {prompt}"
