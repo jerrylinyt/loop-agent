@@ -5,6 +5,7 @@
 
 framework_path: ~/.loop/framework            # 外部共享、唯讀的框架 clone（不進 code repo）
 profile: ~/.loop/profile.yaml                # 使用者定義區（模型/CLI/風格/門檻預設）
+# index: ~/.loop/index.md                    # 跨專案總覽（自動 upsert，預設即此路徑，通常不需覆蓋）
 
 control: .loop/CONTROL.md
 control_files: [.loop/CONTROL.md, ".loop/phases/*.md"]   # git 守護「整檔被清空」兜底對象（支援 glob）

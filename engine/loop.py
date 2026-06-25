@@ -28,6 +28,7 @@ import glob as globmod
 import select
 import signal
 import shlex
+import shutil
 import hashlib
 import subprocess
 from collections import deque, Counter
@@ -50,6 +51,7 @@ except (AttributeError, ValueError):
 DEFAULTS = {
     "framework_path": os.path.expanduser("~/.loop/framework"),
     "profile": os.path.expanduser("~/.loop/profile.yaml"),
+    "index": os.path.expanduser("~/.loop/index.md"),   # 跨專案總覽（自動維護）
     "control": "CONTROL.md",
     "control_files": ["CONTROL.md", "phases/*.md"],
     "workspace": {"mode": "in_repo"},
@@ -107,16 +109,26 @@ DEFAULTS = {
                 "把涉及任務標 FROZEN，交人類裁決。判斷依據寫進 Issue/修正記錄。"
             ),
             "plan": (
-                "你正在執行 Loop Engineering 的【階段②：生成規劃書】，目標是讓『規劃書』收斂。\n"
+                "你正在執行 Loop Engineering【階段②：生成/精修規劃書】（生成輪）。\n"
                 "讀 {requirements} + 框架 rules（{framework}/rules/ 的 BLUEPRINT、context-budget、"
                 "state-model、convergence、completeness）。\n"
                 "依 {framework}/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 "
                 "{control} 等規劃書（loop.config.yaml + CONTROL.md + phases/*.md）。\n"
-                "這是收斂迴圈：若已存在規劃書，請『先不看舊版、從需求獨立重推一份』再與現有比對；\n"
+                "收斂迴圈：若已存在規劃書，請『先不看舊版、從需求獨立重推一份』再與現有比對；\n"
                 "  僅在有『實質差異』時才修改檔案；無實質差異就不要動檔。\n"
-                "接著依 {framework}/generators/2-plan-review-gate.md 自我檢查 Plan Gate。\n"
-                "最後更新 {plan_md} 的兩欄：plan_gate_last(PASS/FAIL)、plan_changed_last(true/false)。\n"
-                "寫檔只允許 .loop/，禁止寫框架。結束 git add -A && git commit（工作區）。"
+                "把 {plan_md} 的 plan_changed_last 設 true（本輪有實質改動）/ false（無）。\n"
+                "寫檔只允許 .loop/，禁止寫框架。結束 git add -A && git commit。\n"
+                "（Plan Gate 由獨立的審查輪負責，你這輪不需自審。）"
+            ),
+            "plan_gate": (
+                "你正在執行 Loop Engineering【階段②的獨立 Plan Gate】（全新 context，只審不生）。\n"
+                "讀 {requirements} + .loop/ 的 loop.config.yaml / CONTROL.md / phases/*.md "
+                "+ {framework}/generators/2-plan-review-gate.md。\n"
+                "逐項檢查 Gate（需求全覆蓋 / 任務粒度 / 無循環依賴 / 停止可判讀 / 收斂就位 / "
+                "逃生門 / context 防爆 / 框架唯讀 / 引擎可讀 / 輪數估算）。\n"
+                "❗只審查、不要修改任何規劃書檔（read-only verify）。\n"
+                "把結果寫進 {plan_md}：plan_gate_last= PASS（全過）或 FAIL（未過項記到 plan.log）。\n"
+                "結束 git add -A && git commit（理論上只有 {plan_md} 會變）。"
             ),
         },
     },
@@ -372,8 +384,13 @@ def human_needed(cfg, control):
 
 # ─────────────── git 改動 + 安全網（只作用於工作區） ───────────────
 def in_git_repo():
-    return subprocess.run(["git", "rev-parse", "--is-inside-work-tree"],
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    if shutil.which("git") is None:
+        return False
+    try:
+        return subprocess.run(["git", "rev-parse", "--is-inside-work-tree"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    except OSError:
+        return False
 
 
 def changed_files():
@@ -613,9 +630,126 @@ def _run_agent_pipe(cmd, log_path, round_timeout, idle_timeout):
             time.sleep(1.0)
 
 
+# ─────────────── 開跑前健檢（preflight） ───────────────
+def _is_placeholder(v):
+    return (not v) or ("<" in str(v) and ">" in str(v))
+
+
+def preflight(cfg, stage):
+    """開跑前健檢。stage ∈ {'plan','execute'}。回傳 (errors, warnings);errors 非空應中止。"""
+    errors, warnings = [], []
+    fw = os.path.expanduser(cfg.get("framework_path", ""))
+    if not fw or not os.path.isdir(fw):
+        errors.append(f"framework_path 不存在或非目錄：{fw}")
+    elif not os.path.isfile(os.path.join(fw, "rules", "boot-sequence.md")):
+        warnings.append(f"framework_path 看起來不像框架（缺 rules/boot-sequence.md）：{fw}")
+
+    agent = cfg.get("agent", {})
+    models = agent.get("models", {})
+    for k in ("default", "enhanced"):
+        if _is_placeholder(models.get(k)):
+            errors.append(f"agent.models.{k} 仍是佔位值，請在 ~/.loop/profile.yaml 或 config 填入實際模型。")
+    bc = agent.get("build_cmd") or ""
+    exe = shlex.split(bc)[0] if bc.strip() else ""
+    if exe and not exe.startswith("{") and shutil.which(exe) is None:
+        warnings.append(f"build_cmd 的執行檔在 PATH 找不到（'{exe}'）：{bc}")
+
+    if not in_git_repo():
+        warnings.append("當前目錄不是 git repo（工作區需要 git 安全網；建議 git init）。")
+    if not cfg.get("phases"):
+        (errors if stage == "execute" else warnings).append("config 沒有 phases 定義。")
+
+    loop_dir = os.path.dirname(cfg.get("control", "")) or "."
+    req = os.path.join(loop_dir, "REQUIREMENTS.md")
+    if stage == "plan" and not os.path.exists(req):
+        errors.append(f"找不到 {req}（請先完成階段①需求）。")
+    if stage == "execute" and not os.path.exists(cfg.get("control", "")):
+        errors.append(f"找不到 {cfg.get('control')}（請先完成階段②生成規劃書）。")
+    return errors, warnings
+
+
+def report_preflight(cfg, stage, emit):
+    """印出健檢結果;回傳 True=可繼續(無 error)。"""
+    errors, warnings = preflight(cfg, stage)
+    for w in warnings:
+        emit(f"  ⚠️  {w}")
+    for e in errors:
+        emit(f"  ❌ {e}")
+    if errors:
+        emit(f"  ✋ preflight 有 {len(errors)} 個錯誤,請修正後再跑（stage={stage}）。")
+    return not errors
+
+
+# ─────────────── 震盪歷史持久化（重啟接續，不歸零） ───────────────
+def fail_history_path(cfg):
+    return os.path.join(cfg["runtime"]["state_dir"], "fail_history")
+
+
+def load_fail_history(cfg, maxlen):
+    dq = deque(maxlen=maxlen)
+    p = fail_history_path(cfg)
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    dq.append(line)
+    return dq
+
+
+def save_fail_history(cfg, dq):
+    p = fail_history_path(cfg)
+    os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("\n".join(dq) + ("\n" if dq else ""))
+
+
+# ─────────────── 跨專案總覽（~/.loop/index.md 自動 upsert） ───────────────
+def update_index(cfg, status):
+    """以工作區絕對路徑為 key,upsert 一行到 index。context-cheap:只存索引,不存內文。"""
+    try:
+        idx = os.path.expanduser(cfg.get("index") or "~/.loop/index.md")
+        os.makedirs(os.path.dirname(idx) or ".", exist_ok=True)
+        repo = os.path.abspath(".")
+        name = os.path.basename(repo)
+        control = cfg.get("control", "")
+        has_ctl = bool(control) and os.path.exists(control)
+        phase = get_val(control, "current_phase") if has_ctl else "-"
+        stuck = get_val(control, "stuck_level") if has_ctl else "-"
+        ts = datetime.now().strftime("%F %T")
+        row = f"| {name} | {repo} | {phase or '-'} | {stuck or '-'} | {status} | {ts} |"
+        header = ["# Loop 專案總覽（自動維護）", "",
+                  "| 專案 | repo | phase | stuck | 狀態 | 更新 |",
+                  "|------|------|-------|-------|------|------|"]
+        body = []
+        if os.path.exists(idx):
+            with open(idx, encoding="utf-8") as f:
+                for line in f:
+                    line = line.rstrip("\n")
+                    if not line.startswith("| "):
+                        continue
+                    if line.startswith("| 專案 ") or set(line) <= set("|-: "):
+                        continue
+                    if f"| {repo} |" in line:
+                        continue  # 移除同專案舊行
+                    body.append(line)
+        body.append(row)
+        with open(idx, "w", encoding="utf-8") as f:
+            f.write("\n".join(header + body) + "\n")
+    except OSError:
+        pass
+
+
 # ─────────────── 主迴圈 ───────────────
 def main():
     cfg = load_config()
+    rc = _run_execute(cfg)
+    status = {0: "done", 1: "stopped", 2: "human_required"}.get(rc, "stopped")
+    update_index(cfg, status)
+    return rc
+
+
+def _run_execute(cfg):
     rt = cfg["runtime"]
     control = cfg["control"]
     osc = cfg["oscillation"]
@@ -632,11 +766,9 @@ def main():
         hb(msg)
         log_line(msg)
 
-    if not cfg.get("phases"):
-        hb("⚠️  config 沒有 phases 定義（loop.config.yaml）。請先完成階段②生成規劃書。")
+    os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
+    if not report_preflight(cfg, "execute", log_both):
         return 1
-    if not in_git_repo():
-        hb("⚠️  當前目錄不是 git repo，建議先 git init（工作區需要 git 安全網）。")
 
     log_line("")
     log_line(f"########## LOOP 啟動 {datetime.now():%F %T} ##########")
@@ -644,11 +776,14 @@ def main():
 
     # 把框架 commit 快照寫進 CONTROL（供追溯）
     fw = cfg["framework_path"]
-    if os.path.isdir(fw):
-        r = subprocess.run(["git", "-C", fw, "rev-parse", "--short", "HEAD"],
-                           capture_output=True, text=True)
-        if r.returncode == 0 and r.stdout.strip():
-            set_val(control, "framework_ref", r.stdout.strip())
+    if os.path.isdir(fw) and shutil.which("git"):
+        try:
+            r = subprocess.run(["git", "-C", fw, "rev-parse", "--short", "HEAD"],
+                               capture_output=True, text=True)
+            if r.returncode == 0 and r.stdout.strip():
+                set_val(control, "framework_ref", r.stdout.strip())
+        except OSError:
+            pass
 
     prompts = cfg["agent"]["prompts"]
     base_prompt = fmt_prompt(prompts.get("base"), control=control, framework=fw)
@@ -656,7 +791,9 @@ def main():
 
     state_dir = rt["state_dir"]
     os.makedirs(state_dir, exist_ok=True)
-    fail_history = deque(maxlen=osc["osc_window"])
+    fail_history = load_fail_history(cfg, osc["osc_window"])  # 持久化：重啟接續，不歸零
+    if fail_history:
+        log_both(f"  ↺ 從 .loop_state 接續震盪歷史（{len(fail_history)} 筆）。")
     prev_pass = None
 
     for i in range(1, rt["max_rounds"] + 1):
@@ -707,6 +844,7 @@ def main():
         if progressed:
             rounds_since = 0
             fail_history.clear()
+            save_fail_history(cfg, fail_history)
             if stuck_level != 0:
                 log_both("  ↩ 有進展，stuck 解除、換回預設模型。")
             stuck_level, enhanced_used = 0, 0
@@ -715,6 +853,7 @@ def main():
         elif is_fail_verify:
             rounds_since += 1
             fail_history.append(fail_fingerprint(control))
+            save_fail_history(cfg, fail_history)
             if stuck_level == 1:
                 enhanced_used += 1
 
