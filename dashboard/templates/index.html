@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loop Engineering Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .log-window {
+            height: 400px;
+            overflow-y: auto;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 10px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <h1 class="text-2xl font-bold text-blue-400">Loop Engineering Dashboard</h1>
+    </nav>
+
+    <div class="container mx-auto px-6 py-8 flex gap-6">
+        <!-- Sidebar: Project List -->
+        <div class="w-1/3">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-300">Projects & Workspaces</h2>
+                <button onclick="showInitModal()" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm transition">+ New</button>
+            </div>
+            <div id="project-list" class="space-y-4">
+                <!-- Project cards injected here -->
+                <div class="text-gray-500">Loading projects...</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="w-2/3" id="main-content" style="display: none;">
+            <div class="bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <div>
+                        <h2 class="text-2xl font-bold text-white" id="ws-title">Repo / Workspace</h2>
+                        <p class="text-sm text-gray-400 mt-1" id="ws-path">/path/to/repo</p>
+                    </div>
+                    <div class="space-x-2">
+                        <button id="btn-start" onclick="startProject()" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded font-medium transition">Start (Auto)</button>
+                        <button id="btn-stop" onclick="stopProject()" class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded font-medium transition" style="display:none;">Force Stop</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4 mb-6">
+                    <div class="bg-gray-700 p-3 rounded">
+                        <span class="text-xs text-gray-400 uppercase tracking-wider">Phase</span>
+                        <div class="text-lg font-semibold" id="ws-phase">-</div>
+                    </div>
+                    <div class="bg-gray-700 p-3 rounded">
+                        <span class="text-xs text-gray-400 uppercase tracking-wider">Stuck Level</span>
+                        <div class="text-lg font-semibold" id="ws-stuck">-</div>
+                    </div>
+                    <div class="bg-gray-700 p-3 rounded">
+                        <span class="text-xs text-gray-400 uppercase tracking-wider">Status</span>
+                        <div class="text-lg font-semibold" id="ws-status">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="border-b border-gray-700 mb-4">
+                <nav class="-mb-px flex space-x-8">
+                    <button onclick="switchTab('logs')" id="tab-logs" class="border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Live Logs</button>
+                    <button onclick="switchTab('config')" id="tab-config" class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">loop.config.yaml</button>
+                </nav>
+            </div>
+
+            <!-- Tab Content: Logs -->
+            <div id="content-logs">
+                <div class="flex space-x-2 mb-2">
+                    <button onclick="switchLog('loop')" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">loop.log</button>
+                    <button onclick="switchLog('plan')" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">plan.log</button>
+                    <span id="current-log-label" class="ml-4 py-1 text-sm text-blue-400 font-mono">Viewing: loop.log</span>
+                </div>
+                <div id="log-window" class="log-window"></div>
+            </div>
+
+            <!-- Tab Content: Config -->
+            <div id="content-config" style="display: none;">
+                <textarea id="config-editor" class="w-full h-96 bg-gray-900 text-gray-300 p-4 font-mono text-sm border border-gray-700 rounded focus:outline-none focus:border-blue-500"></textarea>
+                <div class="mt-4 flex justify-end">
+                    <button onclick="saveConfig()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition">Save Config</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Init Modal -->
+    <div id="init-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style="display: none;">
+        <div class="bg-gray-800 p-6 rounded-lg w-1/3 border border-gray-700">
+            <h2 class="text-xl font-bold text-white mb-4">Init New Workspace</h2>
+            <div class="mb-4">
+                <label class="block text-sm text-gray-400 mb-1">Absolute Path to Code Repo</label>
+                <input type="text" id="init-repo" class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600" placeholder="e.g. C:/Users/yuting/IdeaProjects/my-app">
+            </div>
+            <div class="mb-6">
+                <label class="block text-sm text-gray-400 mb-1">Workspace Name</label>
+                <input type="text" id="init-ws" class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600" placeholder="e.g. default">
+            </div>
+            <div class="flex justify-end space-x-2">
+                <button onclick="hideInitModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded">Cancel</button>
+                <button onclick="submitInit()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded">Initialize</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentProjectId = null;
+        let eventSource = null;
+
+        function showInitModal() {
+            document.getElementById('init-modal').style.display = 'flex';
+        }
+
+        function hideInitModal() {
+            document.getElementById('init-modal').style.display = 'none';
+        }
+
+        async function submitInit() {
+            const repo = document.getElementById('init-repo').value;
+            const ws = document.getElementById('init-ws').value || 'default';
+            if(!repo) return alert("Repository path is required");
+
+            const res = await fetch('/api/projects/init', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({repo_path: repo, workspace_name: ws})
+            });
+
+            if(res.ok) {
+                hideInitModal();
+                fetchProjects();
+                alert(`Workspace ${ws} initialized in ${repo}!`);
+            } else {
+                const err = await res.json();
+                alert("Failed to initialize: " + err.detail);
+            }
+        }
+
+        async function fetchProjects() {
+            const res = await fetch('/api/projects');
+            const projects = await res.json();
+            
+            const listDiv = document.getElementById('project-list');
+            listDiv.innerHTML = '';
+            
+            if (projects.length === 0) {
+                listDiv.innerHTML = '<div class="text-gray-500">No projects found in index.md</div>';
+                return;
+            }
+
+            projects.forEach(p => {
+                const isRunning = p.is_running;
+                const statusColor = isRunning ? 'bg-green-500' : (p.status === 'human_required' ? 'bg-yellow-500' : 'bg-gray-500');
+                
+                const card = document.createElement('div');
+                card.className = `p-4 bg-gray-800 rounded-lg cursor-pointer border hover:border-blue-500 transition ${currentProjectId === p.id ? 'border-blue-500' : 'border-gray-700'}`;
+                card.onclick = () => selectProject(p);
+                
+                card.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="font-bold text-lg">${p.repo_name}</div>
+                            <div class="text-xs text-gray-400 mt-1">${p.workspace}</div>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <div class="w-3 h-3 rounded-full ${statusColor}"></div>
+                        </div>
+                    </div>
+                `;
+                listDiv.appendChild(card);
+            });
+        }
+
+        async function selectProject(p) {
+            currentProjectId = p.id;
+            document.getElementById('main-content').style.display = 'block';
+            document.getElementById('ws-title').innerText = `${p.repo_name} / ${p.workspace}`;
+            document.getElementById('ws-path').innerText = p.repo;
+            document.getElementById('ws-phase').innerText = p.phase;
+            document.getElementById('ws-stuck').innerText = p.stuck;
+            document.getElementById('ws-status').innerText = p.status;
+            
+            if (p.is_running) {
+                document.getElementById('btn-start').style.display = 'none';
+                document.getElementById('btn-stop').style.display = 'inline-block';
+            } else {
+                document.getElementById('btn-start').style.display = 'inline-block';
+                document.getElementById('btn-stop').style.display = 'none';
+            }
+
+            // Highlight selected card
+            fetchProjects();
+
+            // Load Config
+            const res = await fetch(`/api/projects/${p.id}/config`);
+            if(res.ok) {
+                const data = await res.json();
+                document.getElementById('config-editor').value = data.content;
+            } else {
+                document.getElementById('config-editor').value = "# Failed to load config";
+            }
+
+            // Start log stream
+            switchLog('loop');
+        }
+
+        async function startProject() {
+            if(!currentProjectId) return;
+            document.getElementById('btn-start').innerText = "Starting...";
+            const res = await fetch(`/api/projects/${currentProjectId}/start`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mode: 'auto'})
+            });
+            if(res.ok) {
+                setTimeout(() => {
+                    fetchProjects().then(() => {
+                        const p = document.getElementById('ws-title').innerText;
+                        // refresh logic will handle buttons
+                        selectProject({id: currentProjectId, repo_name: p.split('/')[0].trim(), workspace: p.split('/')[1].trim(), phase: '-', stuck: '-', status: '-', is_running: true, repo: document.getElementById('ws-path').innerText});
+                    });
+                }, 1000);
+            } else {
+                alert("Failed to start");
+                document.getElementById('btn-start').innerText = "Start (Auto)";
+            }
+        }
+
+        async function stopProject() {
+            if(!currentProjectId) return;
+            document.getElementById('btn-stop').innerText = "Stopping...";
+            const res = await fetch(`/api/projects/${currentProjectId}/stop`, {method: 'POST'});
+            if(res.ok) {
+                setTimeout(() => {
+                    fetchProjects().then(() => {
+                        const p = document.getElementById('ws-title').innerText;
+                        selectProject({id: currentProjectId, repo_name: p.split('/')[0].trim(), workspace: p.split('/')[1].trim(), phase: '-', stuck: '-', status: '-', is_running: false, repo: document.getElementById('ws-path').innerText});
+                    });
+                }, 1000);
+            } else {
+                alert("Failed to stop");
+                document.getElementById('btn-stop').innerText = "Force Stop";
+            }
+        }
+
+        async function saveConfig() {
+            if(!currentProjectId) return;
+            const content = document.getElementById('config-editor').value;
+            const res = await fetch(`/api/projects/${currentProjectId}/config`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({content})
+            });
+            if(res.ok) {
+                alert("Config Saved Successfully!");
+            } else {
+                const err = await res.json();
+                alert("Error saving config: " + err.detail);
+            }
+        }
+
+        function switchTab(tab) {
+            document.getElementById('content-logs').style.display = tab === 'logs' ? 'block' : 'none';
+            document.getElementById('content-config').style.display = tab === 'config' ? 'block' : 'none';
+            
+            const tLogs = document.getElementById('tab-logs');
+            const tConfig = document.getElementById('tab-config');
+            
+            if(tab === 'logs') {
+                tLogs.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
+                tConfig.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
+            } else {
+                tConfig.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
+                tLogs.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
+            }
+        }
+
+        function switchLog(type) {
+            if(!currentProjectId) return;
+            document.getElementById('current-log-label').innerText = `Viewing: ${type}.log`;
+            
+            if(eventSource) {
+                eventSource.close();
+            }
+
+            const logWindow = document.getElementById('log-window');
+            logWindow.innerHTML = ''; // Clear
+
+            eventSource = new EventSource(`/api/projects/${currentProjectId}/logs/${type}`);
+            eventSource.onmessage = function(event) {
+                const div = document.createElement('div');
+                div.textContent = event.data;
+                logWindow.appendChild(div);
+                logWindow.scrollTop = logWindow.scrollHeight; // Auto-scroll
+            };
+            eventSource.onerror = function(error) {
+                console.log("EventSource failed:", error);
+                eventSource.close();
+            };
+        }
+
+        // Auto-refresh project list every 5 seconds
+        setInterval(() => {
+            if(currentProjectId) {
+                // Background refresh without losing focus
+                fetch('/api/projects').then(r => r.json()).then(projects => {
+                    const p = projects.find(x => x.id === currentProjectId);
+                    if(p) {
+                        document.getElementById('ws-phase').innerText = p.phase;
+                        document.getElementById('ws-stuck').innerText = p.stuck;
+                        document.getElementById('ws-status').innerText = p.status;
+                        
+                        if (p.is_running) {
+                            document.getElementById('btn-start').style.display = 'none';
+                            document.getElementById('btn-stop').style.display = 'inline-block';
+                            document.getElementById('btn-stop').innerText = "Force Stop";
+                        } else {
+                            document.getElementById('btn-start').style.display = 'inline-block';
+                            document.getElementById('btn-stop').style.display = 'none';
+                            document.getElementById('btn-start').innerText = "Start (Auto)";
+                        }
+                    }
+                });
+            } else {
+                fetchProjects();
+            }
+        }, 5000);
+
+        // Initial load
+        fetchProjects();
+    </script>
+</body>
+</html>

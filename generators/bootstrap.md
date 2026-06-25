@@ -23,9 +23,10 @@
 
 用你的 shell 工具執行(把 `<framework_path>` / `<repo>` / `<name>` 換成 STEP 0 確認的值):
 ```bash
+pip install -r <framework_path>/requirements.txt
 python3 <framework_path>/init-project.py <repo> --name <name>
 ```
-這只會建立 `.loop/<name>/`(REQUIREMENTS/config 樣板 + `.gitignore`),**不會啟動任何收斂迴圈**,
+這只會安裝框架所需的依賴（如 PyYAML）並建立 `.loop/<name>/`(REQUIREMENTS/config 樣板 + `.gitignore`)，**不會啟動任何收斂迴圈**,
 跑完馬上結束、安全。若指令印出「= 已存在,略過」,代表這個 workspace 已經初始化過,跳過此步驟即可。
 
 ## STEP 2｜需求訪談

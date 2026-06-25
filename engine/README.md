@@ -38,13 +38,19 @@ python3 <fw>/engine/run.py --stage execute           # 只執行（gated review 
 
 唯一的鎖是防呆用的 **單一啟動鎖**(`acquire_run_lock`/`release_run_lock`，鎖檔在
 `.loop/<name>/.loop_state/run.lock`)：同一個 workspace 不會被手滑啟動兩次(避免互踩同一份
-CONTROL/PLAN/git 狀態)；鎖檔超過 1 小時視為殘留,可自動接手。這跟並行無關,純粹是冪等保護。
+CONTROL/PLAN/git 狀態)。鎖檔**每輪心跳更新 mtime**(`touch_run_lock`)，殘留判定門檻為
+`max(3600, 3×round_timeout)`——所以正常跑的長迴圈(>1h)不會被誤判成殘留而被第二個程序搶鎖並行;
+只有真正異常結束留下的鎖才會被自動接手。這跟並行無關,純粹是冪等保護。
 
 ## loop.py（執行引擎）它做什麼
 反覆觸發 coding agent 跑 `CONTROL.md`，並負責：
 - **config cascade**：框架預設 < `~/.loop/profile.yaml` < 專案 `.loop/loop.config.yaml` < 環境變數。
 - **N 階段流程控制**：停止條件、Phase Gate 全依 `config.phases`（最後一筆=最終階段），不寫死階段數。
-- **震盪偵測 + 三層升級**：失敗指紋環狀歷史(**持久化於 `.loop/.loop_state/fail_history`，重啟接續不歸零**) → 偵測「改A壞B」/卡住 → 預設→增強→人類。
+- **震盪偵測 + 三層升級**：三種卡法任一達門檻都走預設→增強→人類——
+  ①失敗指紋環狀歷史(偵測「改A壞B」震盪) ②`rounds_since_progress`(不收斂)
+  ③**無活動偵測**(活動簽章=phase+各 pass 總和+HEAD,連續多輪不變;另以 `killed_streak`
+  防『中斷留半套被 commit 騙過簽章』——抓 CLI 逾時/空轉,不再無聲燒到 max_rounds)。
+  失敗指紋與進度/活動標記都**持久化於 `.loop/.loop_state/`(`fail_history`、`progress`)，重啟接續不歸零**。
 - **git 守護**：只作用於工作區（code repo）；整檔空白兜底還原 + 補漏 commit。**絕不寫 `framework_path`**（git 缺失/不在 PATH 也安全降級為警告，不會丟例外）。
 - **watchdog**：單輪逾時 / 閒置中斷（連 subAgent 一起殺）。
 - **log rotation**：`loop.log` 超過上限切檔；log 永久保存歷史，但**主控台才是預設的即時觀看方式**(見下)。

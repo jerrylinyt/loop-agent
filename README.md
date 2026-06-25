@@ -144,6 +144,7 @@ cascade：**框架預設 < `~/.loop/profile.yaml` < 專案 `.loop/<name>/loop.co
 ```bash
 # 0) 框架放在固定位置（本資料夾就是；或 clone 到 ~/.loop/framework）
 FW=<此框架路徑>
+pip install -r $FW/requirements.txt  # 安裝依賴（如 PyYAML）
 
 # 1) 在你的 code repo 初始化一個 workspace(=一份需求；建 .loop/<name>/、寫 framework_path、補 .gitignore)
 python3 $FW/init-project.py /path/to/your-code-repo --name default
