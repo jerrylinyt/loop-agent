@@ -45,9 +45,15 @@ tail -f loop.log
 可用環境變數覆蓋：`LOOP_CONFIG`（config 路徑）、`LOOP_PROFILE`、`MAX_ROUNDS`、`INTERVAL`、
 `LOG_FILE`、`ROUND_TIMEOUT`、`IDLE_TIMEOUT`、`CONTROL`、`DEFAULT_MODEL`、`ENHANCED_MODEL`。
 
-## 設定模型指令
-`config.models.build_cmd` 是樣板字串，`{model}` / `{prompt}` 會被帶入（`{prompt}` 保持單一參數）。
-例：`"codex e --model {model} {prompt}"`。建議放 `~/.loop/profile.yaml` 全機共用。
+## 設定 agent 指令（全抽成 config，code 只讀設定）
+全部在 `config.agent`（建議放 `~/.loop/profile.yaml` 全機共用）：
+- `build_cmd`：指令樣板，`{model}` / `{prompt}` 帶入（`{prompt}` 保持單一參數），可選 `{args}` 佔位。
+  例：`"codex e --model {model} {prompt}"`。
+- `extra_args`：額外固定 CLI 參數（如 `["--yolo"]`）。template 有 `{args}` → 插在該處；否則接在 prompt 前；
+  template 連 `{prompt}` 都沒寫 → prompt 與 extra_args 會補在最後（絕不遺漏 prompt）。
+- `models.default` / `models.enhanced`：兩層模型（卡住時切 enhanced）。env `DEFAULT_MODEL`/`ENHANCED_MODEL` 可覆蓋。
+- `prompts.base` / `prompts.escalation` / `prompts.plan`：提示樣板（省略用框架預設）。
+  佔位：`{control}` `{framework}` `{plan_md}` `{requirements}`。
 
 ## 回傳碼
 - `0` 正常完成（LOOP COMPLETE）

@@ -78,20 +78,11 @@ def plan_files_changed(cfg):
     return False
 
 
-def build_prompt(cfg, fw, plan_md):
-    return (
-        "你正在執行 Loop Engineering 的【階段②:生成規劃書】,目標是讓『規劃書』收斂。\n"
-        f"讀 .loop/REQUIREMENTS.md + 框架 rules({fw}/rules/ 的 BLUEPRINT、context-budget、"
-        "state-model、convergence、completeness)。\n"
-        f"依 {fw}/generators/1-plan-generator.md:(重新)獨立推導並產出/精修 "
-        ".loop/loop.config.yaml + .loop/CONTROL.md + .loop/phases/*.md。\n"
-        "這是收斂迴圈:若已存在規劃書,請『先不看舊版、從 REQUIREMENTS 獨立重推一份』再與現有比對;\n"
-        "  僅在有『實質差異』時才修改檔案;無實質差異就不要動檔。\n"
-        f"接著依 {fw}/generators/2-plan-review-gate.md 自我檢查 Plan Gate。\n"
-        f"最後更新 {plan_md} 的兩個欄位:plan_gate_last(PASS/FAIL)、"
-        "plan_changed_last(true=本輪有實質改動 / false=無)。\n"
-        "寫檔只允許 .loop/,禁止寫框架。結束 git add -A && git commit(工作區)。"
-    )
+def build_prompt(cfg, fw, plan_md, requirements):
+    """提示樣板全來自 config（agent.prompts.plan）；code 只代入佔位。"""
+    tpl = cfg["agent"]["prompts"]["plan"]
+    return L.fmt_prompt(tpl, framework=fw, plan_md=plan_md,
+                        requirements=requirements, control=cfg["control"])
 
 
 def main():
@@ -135,13 +126,13 @@ def main():
     log_both(f"\n########## PLAN LOOP 啟動 {datetime.now():%F %T}  mode={mode} ##########")
     hb(f"規劃書生成迴圈啟動。框架={fw}  詳細輸出:{log_path}（tail -f 觀看）\n")
 
-    model = cfg["models"]["default"]
+    model = cfg["agent"]["models"]["default"]
     for i in range(1, max_rounds + 1):
         L.rotate_log_if_needed(cfg)
         if L.get_val(plan_md, "plan_status") == "converged":
             break
 
-        prompt = build_prompt(cfg, fw, plan_md)
+        prompt = build_prompt(cfg, fw, plan_md, req)
         cmd = L.build_cmd(cfg, model, prompt)
         ts = datetime.now().strftime("%F %T")
         hb(f"▶ Plan Round {i} 開始 ({ts})")

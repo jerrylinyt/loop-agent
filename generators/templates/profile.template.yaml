@@ -2,11 +2,13 @@
 # cascade 中層：框架預設 < 本檔 < 專案 .loop/loop.config.yaml < 環境變數
 # 放「屬於你這個人、不該每專案重生」的東西；專案 config 只覆蓋真正獨有的少數值。
 
-# 你慣用的三層模型指令（{model}/{prompt} 帶入）。設一次，全機專案共用。
-models:
-  default: "<你的預設模型>"
-  enhanced: "<你的增強模型>"
+# Agent 指令與模型（設一次，全機專案共用）。{model}/{prompt} 帶入；可加 {args} 佔位插入 extra_args。
+agent:
   build_cmd: "codex e --model {model} {prompt}"
+  extra_args: []                  # 額外固定 CLI 參數（如 ["--yolo"]）
+  models:
+    default: "<你的預設模型>"
+    enhanced: "<你的增強模型>"
 
 # 你慣用的門檻預設（可被專案 config 覆蓋）
 oscillation:

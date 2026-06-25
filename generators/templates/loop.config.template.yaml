@@ -61,8 +61,19 @@ runtime:
   journal_in_control_keep: 1
   control_max_bytes: 60000
 
-# ── 三層模型指令（{model}/{prompt} 帶入；建議放 ~/.loop/profile.yaml 全機共用）──
-models:
-  default: "<你的預設模型>"
-  enhanced: "<你的增強模型>"
-  build_cmd: "codex e --model {model} {prompt}"
+# ── Agent 指令與提示（全抽成設定；code 只讀這裡）──
+# 建議把 build_cmd / models / extra_args 放 ~/.loop/profile.yaml 全機共用；這裡只覆蓋專案獨有的。
+agent:
+  build_cmd: "codex e --model {model} {prompt}"   # {model}/{prompt} 帶入；可加 {args} 佔位插入 extra_args
+  extra_args: []                                  # 額外固定 CLI 參數（如 ["--yolo"]）；無 {args} 佔位則接在 prompt 前
+  models:
+    default: "<你的預設模型>"
+    enhanced: "<你的增強模型>"                      # 卡住時切換的更強模型
+  # prompts 省略 → 用框架預設。要客製才取消註解。佔位：{control} {framework} {plan_md} {requirements}
+  # prompts:
+  #   base: |
+  #     請讀取 {control}，依 {framework}/rules/boot-sequence.md 的 BOOT SEQUENCE 工作…
+  #   escalation: |
+  #     前幾輪偵測到反覆修壞…先判根因…
+  #   plan: |
+  #     階段②：從 {requirements} 獨立重推規劃書…更新 {plan_md}…

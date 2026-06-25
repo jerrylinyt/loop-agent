@@ -82,12 +82,53 @@ DEFAULTS = {
         "journal_in_control_keep": 1,
         "control_max_bytes": 60000,
     },
-    "models": {
-        "default": "<你的預設模型>",
-        "enhanced": "<你的增強模型>",
+    # ── Agent 指令與提示（全抽成設定；code 只讀這裡，不寫死）──
+    "agent": {
+        # 指令樣板：{model}/{prompt} 帶入；可選 {args} 佔位插入 extra_args（{prompt} 保持單一參數）
         "build_cmd": "codex e --model {model} {prompt}",
+        # 額外固定 CLI 參數（如 ["--yolo"]）；template 無 {args} 佔位時，接在 {prompt} 之前
+        "extra_args": [],
+        "models": {
+            "default": "<你的預設模型>",
+            "enhanced": "<你的增強模型>",     # 卡住時切換的更強模型
+        },
+        # 提示樣板（佔位：{control} {framework} {plan_md} {requirements}）。省略則用以下預設。
+        "prompts": {
+            "base": (
+                "請讀取 {control}，依 {framework}/rules/boot-sequence.md 的 BOOT SEQUENCE 開始工作"
+                "（先做 STEP G 的 Git 自檢、結束做 STEP C 的提交）。"
+                "本輪必讀：{control} 與 {framework}/rules/boot-sequence.md；其餘 rules 按需讀。"
+                "每輪務必回填 last_round_mode / last_round_result / last_round_fail_tasks。"
+            ),
+            "escalation": (
+                "前幾輪偵測到反覆修壞（A↔B 震盪 / 卡在驗證）。請先判斷根因再動手："
+                "(1) 實作疏漏（A、B 可同時滿足）→ 一次修對兩邊；"
+                "(2) 規格矛盾（兩條規格本質衝突）→ 不要硬修，開 BLOCKING Issue 寫清楚衝突與出處，"
+                "把涉及任務標 FROZEN，交人類裁決。判斷依據寫進 Issue/修正記錄。"
+            ),
+            "plan": (
+                "你正在執行 Loop Engineering 的【階段②：生成規劃書】，目標是讓『規劃書』收斂。\n"
+                "讀 {requirements} + 框架 rules（{framework}/rules/ 的 BLUEPRINT、context-budget、"
+                "state-model、convergence、completeness）。\n"
+                "依 {framework}/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 "
+                "{control} 等規劃書（loop.config.yaml + CONTROL.md + phases/*.md）。\n"
+                "這是收斂迴圈：若已存在規劃書，請『先不看舊版、從需求獨立重推一份』再與現有比對；\n"
+                "  僅在有『實質差異』時才修改檔案；無實質差異就不要動檔。\n"
+                "接著依 {framework}/generators/2-plan-review-gate.md 自我檢查 Plan Gate。\n"
+                "最後更新 {plan_md} 的兩欄：plan_gate_last(PASS/FAIL)、plan_changed_last(true/false)。\n"
+                "寫檔只允許 .loop/，禁止寫框架。結束 git add -A && git commit（工作區）。"
+            ),
+        },
     },
 }
+
+
+def fmt_prompt(template, **kw):
+    """提示樣板代入（用 replace，避免內文花括號干擾 str.format）。"""
+    out = template or ""
+    for k, v in kw.items():
+        out = out.replace("{" + k + "}", str(v))
+    return out
 
 
 # ─────────────── 極簡 YAML 載入（優先 pyyaml，否則退化解析） ───────────────
@@ -242,8 +283,7 @@ def load_config():
         "ROUND_TIMEOUT": ("runtime", "round_timeout_seconds", int),
         "IDLE_TIMEOUT": ("runtime", "idle_timeout_seconds", int),
         "CONTROL": (None, "control", str),
-        "DEFAULT_MODEL": ("models", "default", str),
-        "ENHANCED_MODEL": ("models", "enhanced", str),
+        # DEFAULT_MODEL / ENHANCED_MODEL 在下方明確導向 agent.models
     }
     for env, (sect, key, cast) in env_map.items():
         if env in os.environ:
@@ -252,6 +292,15 @@ def load_config():
                 cfg.setdefault(sect, {})[key] = val
             else:
                 cfg[key] = val
+
+    # 確保 agent 結構完整（缺的鍵用框架預設補；整段覆蓋也安全；同時避免回寫汙染 DEFAULTS）
+    cfg["agent"] = deep_merge(DEFAULTS["agent"], cfg.get("agent", {}))
+
+    # env：模型覆蓋導向 agent.models
+    if "DEFAULT_MODEL" in os.environ:
+        cfg["agent"]["models"]["default"] = os.environ["DEFAULT_MODEL"]
+    if "ENHANCED_MODEL" in os.environ:
+        cfg["agent"]["models"]["enhanced"] = os.environ["ENHANCED_MODEL"]
     return cfg
 
 
@@ -419,13 +468,23 @@ def rotate_log_if_needed(cfg):
     os.replace(path, f"{path}.1")
 
 
-# ─────────────── 組指令（config.models.build_cmd 樣板） ───────────────
+# ─────────────── 組指令（config.agent.build_cmd 樣板 + extra_args） ───────────────
 def build_cmd(cfg, model, prompt):
-    template = cfg["models"]["build_cmd"]
+    agent = cfg["agent"]
+    template = agent.get("build_cmd") or "codex e --model {model} {prompt}"
+    extra = [str(a) for a in (agent.get("extra_args") or [])]
     tokens = shlex.split(template)
-    out = []
+    has_args_ph = "{args}" in tokens
+    has_prompt_ph = any("{prompt}" in t for t in tokens)
+    out, emitted_extra = [], False
     for t in tokens:
-        if t == "{prompt}":
+        if t == "{args}":
+            out.extend(extra)
+            emitted_extra = True
+        elif t == "{prompt}":
+            if not has_args_ph:          # 無 {args} 佔位 → extra_args 接在 prompt 之前
+                out.extend(extra)
+                emitted_extra = True
             out.append(prompt)
         elif "{model}" in t:
             out.append(t.replace("{model}", model))
@@ -433,6 +492,10 @@ def build_cmd(cfg, model, prompt):
             out.append(t.replace("{prompt}", prompt))
         else:
             out.append(t)
+    if not has_prompt_ph:                 # 樣板沒寫 {prompt} → prompt 一定要帶上（接最後），不可遺漏
+        if not has_args_ph and not emitted_extra:
+            out.extend(extra)
+        out.append(prompt)
     return out
 
 
@@ -587,18 +650,9 @@ def main():
         if r.returncode == 0 and r.stdout.strip():
             set_val(control, "framework_ref", r.stdout.strip())
 
-    base_prompt = (
-        f"請讀取 {control}，依 framework rules 的 BOOT SEQUENCE 開始工作"
-        f"（先做 STEP G 的 Git 自檢、結束做 STEP C 的提交）。"
-        f"必讀：{control} 與 {fw}/rules/boot-sequence.md；其餘 rules 按需讀。"
-        f"每輪務必回填 last_round_mode / last_round_result / last_round_fail_tasks。"
-    )
-    escalation_prompt = (
-        "前幾輪偵測到反覆修壞（A↔B 震盪 / 卡在驗證）。請先判斷根因再動手："
-        "(1) 實作疏漏（A、B 可同時滿足）→ 一次修對兩邊；"
-        "(2) 規格矛盾（兩條規格本質衝突）→ 不要硬修，開 BLOCKING Issue 寫清楚衝突與出處，"
-        "把涉及任務標 FROZEN，交人類裁決。判斷依據寫進 Issue/修正記錄。"
-    )
+    prompts = cfg["agent"]["prompts"]
+    base_prompt = fmt_prompt(prompts.get("base"), control=control, framework=fw)
+    escalation_prompt = fmt_prompt(prompts.get("escalation"), control=control, framework=fw)
 
     state_dir = rt["state_dir"]
     os.makedirs(state_dir, exist_ok=True)
@@ -618,7 +672,8 @@ def main():
                 return 2
 
         tier = get_val(control, "current_model_tier") or "default"
-        model = cfg["models"]["enhanced"] if tier == "enhanced" else cfg["models"]["default"]
+        models = cfg["agent"]["models"]
+        model = models["enhanced"] if tier == "enhanced" else models["default"]
         prompt = base_prompt + ("\n" + escalation_prompt if tier == "enhanced" else "")
         cmd = build_cmd(cfg, model, prompt)
 
