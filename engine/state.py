@@ -2,7 +2,7 @@ import os
 import re
 import logging
 from collections import deque
-from .git_utils import git_head
+from git_utils import git_head
 
 logger = logging.getLogger(__name__)
 

@@ -8,8 +8,8 @@ import logging
 from collections import Counter
 from datetime import datetime
 
-from .git_utils import in_git_repo, changed_files
-from .state import get_val, as_int
+from git_utils import in_git_repo, changed_files
+from state import get_val, as_int
 
 logger = logging.getLogger(__name__)
 
@@ -150,9 +150,9 @@ def preflight(cfg: dict, stage: str) -> tuple[list[str], list[str]]:
 
     agent = cfg.get("agent", {})
     models = agent.get("models", {})
-    for k in ("default", "enhanced"):
+    for k in ("fast", "normal", "thinking"):
         if _is_placeholder(models.get(k)):
-            errors.append(f"agent.models.{k} 仍是佔位值，請在 ~/.loop/profile.yaml 或 config 填入實際模型。")
+            errors.append(f"agent.models.{k} 仍是佔位值，請在專案 config (loop.config.yaml) 填入實際模型。")
     import shlex
     bc = agent.get("build_cmd") or ""
     exe = shlex.split(bc)[0] if bc.strip() else ""
@@ -187,6 +187,31 @@ def report_preflight(cfg: dict, stage: str, emit) -> bool:
     if errors:
         emit(f"  ✋ preflight 有 {len(errors)} 個錯誤,請修正後再跑（stage={stage}）。")
     return not errors
+
+
+def sync_framework_docs(cfg: dict, log_fn):
+    """將框架的 rules/ 與 generators/ 目錄自動同步至專案內的 .loop/ 目錄，並在異動時 commit。"""
+    fw_path = cfg.get("framework_path")
+    if not fw_path or not os.path.exists(fw_path):
+        return
+        
+    loop_dir = ".loop"
+    os.makedirs(loop_dir, exist_ok=True)
+    
+    for d in ["rules", "generators"]:
+        src = os.path.join(fw_path, d)
+        dst = os.path.join(loop_dir, d)
+        if os.path.exists(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+            
+    # 確認是否有異動
+    res = subprocess.run(["git", "status", "--porcelain", ".loop/rules", ".loop/generators"], 
+                         capture_output=True, text=True)
+    if res.stdout.strip():
+        subprocess.run(["git", "add", ".loop/rules", ".loop/generators"])
+        subprocess.run(["git", "commit", "-m", "chore: sync updated loop framework docs"])
+        if log_fn:
+            log_fn("  🔄 自動同步最新框架文件至 .loop/ 並已 Commit。")
 
 
 # ─────────────── 失敗指紋與震盪偵測 ───────────────
