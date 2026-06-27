@@ -1,129 +1,71 @@
-#` 🔁 loop-engineering — 通用 Loop Engineering Agent 框架
+# 🔁 loop-engineering — 通用 Loop Engineering Agent 框架
 
-把「**做不完、信不過、會中斷、會卡死**」的大任務，交給一個「由 AI agent 反覆執行、直到收斂達標」的迴圈。
-本框架是**共享、唯讀**的：它只提供讀取，所有要改的東西（規劃書 + code）都落在你的 **code repo**。
+把「**做不完、信不過、會中斷、會卡死**」的大任務,交給一個「由 AI agent 反覆執行、直到收斂達標」的迴圈。
+你只要**給需求、把關兩個決策點**;其餘交給迴圈自己跑到收斂、卡死了才回頭找你。
 
-> 設計緣由與完整取捨見 `rules/BLUEPRINT.md`（方法論藍圖）。
-
----
-
-## 🤖 給 agent 的速覽（被使用者叫來讀這份 README 的你，先看這段）
-若使用者只說了類似「讀這份 README 然後開始」、卻沒給更多細節：
-1. 去讀 `generators/bootstrap.md` 全文——這是整個框架**唯一、agent-agnostic 的進入點**，不管你是
-   Claude Code、gemini-cli、opencode、codex 或其他任何 CLI 都適用，本檔不假設特定工具。
-2. 依它的 STEP 0~4 做：確認 `framework_path`(=這個 repo 的路徑) / 目標 code repo / workspace 名稱
-   → 跑一次性的 `init-project.py` 腳手架 → 訪談需求 → 人類確認 → **停下來**,把下一步的 `run.py`
-   指令交給人類自己貼上去跑。
-3. ❗**絕對不要**自己接著跑 `plan_loop.py` / `run.py` / `loop.py`——那是長時間、會持續跑到收斂為止
-   的 python 迴圈,必須由人類自己決定何時、用什麼模式啟動,不是技術限制,是刻意的人類決策點。
-4. 若使用者額外要你「幫他的 CLI 裝一個可重複呼叫的捷徑(/指令、custom command 之類)」，見下方
-   「給 agent 用的整合：自己產生捷徑」一節——一樣是你自己讀文件、自己生成，不靠任何安裝腳本。
-
-（以下是給「人」看的完整說明，繼續往下讀即可了解整體架構與所有細節。）
+> 框架是**共享、唯讀**的:它只被讀取,所有要改的東西(規劃書 + code)都落在你的 **code repo** 的 `.loop/<name>/`。
+> 這份 README 只講「人會在意的」;運作細節、每輪防護、收斂協定都在 `rules/`,需要時叫你的 agent 去讀即可。
 
 ---
 
-## 三段生命週期（兩支 python 迴圈 + 一個入口）
-> 框架支援 **「平 Phase (Flat)」** 與 **「樹形 Phase (Tree - 漸進拆解)」** 兩種模式（依專案 config 設定）。
+## 🤖 給 agent 的速覽（使用者只說「讀這份 README 然後開始」時，你看這段就好）
+1. 讀 `generators/bootstrap.md` 全文——這是**唯一、不分 CLI** 的進入點(Claude Code / gemini-cli / opencode / codex 皆適用)。
+2. 依它做:確認 `framework_path` / 目標 code repo / workspace 名稱 → 跑一次性的 `init-project.py` → 訪談需求 →
+   人類確認 → **停下來**,把下一步的 `run.py` 指令交給人類自己貼上去跑。
+3. ❗**絕不要**自己接著跑 `plan_loop.py` / `run.py` / `loop.py`——那是會跑到收斂為止的長迴圈、會燒用量,
+   啟動與否是刻意保留給人類的決策點,不是技術限制。
+4. (選用)使用者要「裝一個可重複呼叫的捷徑(/指令、skill)」→ 見 `integrations/` 範例,依他的 CLI 自己生成,不靠安裝腳本。
 
-```
-① 需求討論          人類提供需求 → .loop/<name>/REQUIREMENTS.md（兩種方式，見下；<name>=一份需求）
-      ↓
-② 生成/規劃（收斂）  engine/plan_loop.py
-   〔code1〕          - 平模式：Round A 生成 / Round B 審查，直到全計畫收斂。
-                     - 樹模式：漸進生長樹結構，每輪拆解節點，直到全樹 PENDING 節點均完成拆解。
-                     卡死處理：連續無進展 → 升級模型 → 仍卡 → 停下交人類（不會空轉到底）
-      ↓〔gated: 停下交人類 review｜auto: 直接接③〕
-③ 執行迴圈（收斂）   engine/loop.py  反覆觸發 agent 依規劃書執行：
-   〔code2〕          - 平模式：依序跑階段，直到最終結果達標或交人類。
-                     - 樹模式：針對葉子節點執行與整合驗證，具備自底向上的解鎖機制。
-```
-> 入口 `engine/run.py` 串接 ②③ 並提供兩種模式。**所有引擎都從 code repo 根目錄執行**（產出落 repo 根、控制檔在 `.loop/<name>/`）。
-> 兩個引擎啟動時都會先跑 **preflight 健檢**（佔位模型、framework_path、git repo、REQUIREMENTS/CONTROL 是否存在…），有錯誤就擋下不空轉。
+---
 
-### 階段① 怎麼提供需求（三選一）
-- **A. 人類直接寫**:`init` 會放一份 `.loop/<name>/REQUIREMENTS.md` 樣板,填好即可(目標/DoD/逐條編號需求 R001…/輸入/限制)。
-- **B. 互動訪談**:把 `generators/0-requirements-interview.md` 交給一個 agent,讓它一組一組問清楚,最後幫你寫成 `.loop/<name>/REQUIREMENTS.md`。
-- **C. 一個指令做完整個前期準備（推薦）**:`generators/bootstrap.md` 是**整段前期準備的單一入口**——
-  交給任何 agent,它會依序幫你「開 workspace(跑 `init-project.py`)→ 需求訪談 → 人類確認」,
-  **做完就停下來**,把下一步該你自己貼上去跑的 `run.py` 指令印出來;agent 不會自己接著跑 ②③(那是長時間、燒用量的收斂迴圈,故意留給人類決定何時啟動)。
-> 三種都產出同一份 `REQUIREMENTS.md`;**人類確認**後才進階段②。
+## 給人類：你需要知道的
 
-### 你的 agent CLI 不是 Claude Code？直接用 C 選項就好
-`generators/bootstrap.md` 本身不假設任何特定 CLI——gemini-cli、opencode、codex、Claude Code…
-都一樣**直接把整份 `bootstrap.md` 貼給你的 agent**即可,不需要安裝任何東西,也不用讀下面這節。
+**怎麼運作(三段)**:① 你提供需求 → ② 規劃迴圈([plan_loop.py](engine/plan_loop.py))把規劃書跑到收斂 →
+③ 執行迴圈([loop.py](engine/loop.py))反覆喚醒全新 agent 做到達標。中途卡死/震盪會自動升級模型,真的卡住才停下交你。
 
-### 給 agent 用的整合：自己產生捷徑（選用，不靠安裝腳本）
-若使用者想要「幫我的 CLI 裝一個可重複呼叫的捷徑(/指令、custom command、skill 之類)」,**不要找安裝
-腳本——這裡沒有,故意不做**。請你(agent)自己做這件事：
+**你只有兩個決策點(human gate)**:
+1. **確認需求**——agent 訪談完、產出 `REQUIREMENTS.md`,你確認。
+2. **review 規劃書**(只在 gated 模式)——規劃收斂後停下,你看過 `.loop/<name>/` 的 config / CONTROL / phases 再放行執行。
 
-1. 看 `integrations/<你的 CLI>/` 底下是否已有現成範例(目前只有 `integrations/claude-code/skills/
-   loop-prep/SKILL.template.md`,是 Claude Code 的格式範例)。
-2. 若使用者用的就是那個 CLI:讀那份 template,把裡面所有 `{{FRAMEWORK_PATH}}` 換成**這個框架的絕對
-   路徑**(也就是這個 repo 在使用者機器上的路徑),用 Write 工具存到該 CLI 慣例的位置
-   (Claude Code 是 `~/.claude/skills/loop-prep/SKILL.md`,或專案層級 `<repo>/.claude/skills/loop-prep/SKILL.md`)。
-3. 若沒有現成範例(用的是 gemini-cli/opencode/codex 等):讀 `generators/bootstrap.md` 全文,依**你
-   自己這個 CLI 的官方文件**(自訂指令/skill/prompt 檔的慣例)生成一份等效的捷徑——格式以官方文件為準,
-   不確定就直接告訴使用者「你的 CLI 沒有現成範例,我需要查一下官方怎麼定義自訂指令」,不要亂猜格式。
-4. 裝完提醒使用者：若目標 skills/指令目錄是**第一次**建立,有些 CLI(如 Claude Code)需要**重啟 session**
-   才會開始監看新目錄。
+**你要選 gated 還是 auto**:
+- **gated(預設,建議)**:規劃收斂後**停下交你 review**,確認後你再手動跑執行。
+- **auto**:規劃收斂後**自動接執行**,一路到達標(中途靠震盪偵測 / 三層升級 / 交人自保)。
 
-> 這份捷徑永遠只是**前期準備(bootstrap)的便利包裝**,核心邏輯都在 `generators/bootstrap.md`。
-> 之後要支援其他 CLI,直接在 `integrations/<該CLI>/` 底下加範例即可,不影響核心。
+**一次只跑一個**:同一個 code repo 不要同時跑兩個 loop(會直接改 `src/`,邏輯互蓋);要換另一份需求,等前一個停了再跑。
 
-### 兩種模式（--mode）
-- **gated（預設，建議）**:`plan_loop` 把規劃書跑到收斂 → **停下交人類 review** → 你確認 `.loop/<name>/` 內的 config/CONTROL/phases 後,再跑執行迴圈。
-- **auto**:規劃書收斂後**自動接續**執行迴圈,一路到最終結果收斂(中途靠震盪偵測/三層升級/human_required 自保)。
+---
 
-### 一個 repo、多份需求（--workspace / --name；一次跑一個）
-`.loop/<name>/` 是一份**完整、互相獨立**的規劃書(REQUIREMENTS/config/CONTROL/phases/log/狀態)。
-同一個 code repo 可以開多個 `<name>`(每個對應一份需求),把多份需求**整理**在一起。
+## 怎麼開始
 
-⚠️ **但一次只跑一個**:本框架不支援在同一個 code repo 同時跑多個 loop——loop 會直接改 `src/`,
-兩個 agent 在重疊輪次改到同一批檔案,git 擋不住「邏輯互蓋」。要換另一份需求,等前一個停了再跑。
-(引擎有「單一啟動鎖」防你手滑把同一個 workspace 跑兩次;真要物理隔離請各自獨立 clone code repo。)
-```bash
-python3 $FW/init-project.py /path/to/repo --name featureA   # 開一個 workspace(需求)
-python3 $FW/init-project.py /path/to/repo --name featureB   # 再開一個,互相獨立(但別同時跑)
-python3 $FW/engine/run.py --workspace featureA              # 跑 A;停了之後再——
-python3 $FW/engine/run.py --workspace featureB              # 跑 B
-```
-
-### 需要參考另一個專案的 code？把它「掛」成唯讀輸入（git worktree）
-loop 一律從**被改的 code repo 根目錄**啟動,agent 的可視範圍就是這個 repo(cwd)。所以遇到
-「把舊專案的 API refactor 進新專案」這種**跨專案**需求,**不要**把 cwd 往上層搬、也不要替各家
-CLI(claude_code / opencode / codex)各寫一套 `--add-dir` 旗標——那會打破 git 安全網的還原點語意,
-又不通用。三家 CLI 唯一保證一致的行為是「**讀得到 cwd 底下的檔案**」,所以正解是把參考來源
-**掛進 cwd 底下當唯讀輸入**。
-
-來源也是 git repo 時,用 `git worktree` 最省:它在新專案底下「多攤開一個資料夾」放舊專案的**真實
-檔案**,但**共用舊專案的 git 歷史、幾乎不佔空間**(不是 `cp -R` 整碗搬,也不是 symlink——symlink
-指到 cwd 外可能被 CLI 的 sandbox 擋掉,不保證跨 CLI)。
+最省事:把 `generators/bootstrap.md` 交給你的 agent(Claude Code 可打 `/loop-prep`),它會幫你開 workspace、訪談需求,
+**停在你該跑 python 之前**。以下是它背後實際做的事,也可以自己手動走:
 
 ```bash
-# 在「新專案」(被改的 code repo) 根目錄執行；OLD = 舊專案路徑、<name> = 你的 workspace
-git -C /path/to/OLD worktree add ./.loop/<name>/inputs/old HEAD   # 掛上唯讀參考
-echo ".loop/*/inputs/" >> .gitignore                              # 讓 git 安全網看不到它(不被一輪一commit收進去)
-chmod -R a-w ./.loop/<name>/inputs/old                            # 防呆：把參考設成唯讀
-# …在 REQUIREMENTS.md §4 輸入 註明這個路徑是「唯讀參考」，跑完 loop 後：
-git -C /path/to/OLD worktree remove ./.loop/<name>/inputs/old     # 用完即清，無殘留
-```
-> 為什麼這樣最穩:檔案實體在 cwd 內 → 三家 CLI 都讀得到;`.gitignore` 後它對 `git add -A` /
-> review-gate 的 `HEAD~1..HEAD` diff 隱形 → **還原點仍只管你真正在改的新專案**;寫入仍只發生在
-> 新專案這一個 git 樹裡(唯一可寫單位)。多個參考來源就掛多個 `inputs/<別名>`。
+FW=<此框架路徑>
+pip install -r $FW/requirements.txt        # 安裝依賴(如 PyYAML)
 
-**進階(選用,CLI-specific):自行放寬 agent 的可讀範圍**
-如果你**固定用某一家 CLI**、又常要跨專案參考,可以改用該 CLI 自己的設定,把整個 `root_code_dir`
-(你放所有專案的母目錄)加進 agent 的**可讀**範圍,省掉每次掛 worktree。例如:opencode 在它的
-config / `AGENTS.md`、claude_code 用 `--add-dir` 或 settings、codex 用 sandbox 設定。
-代價是**不通用**(換 CLI 要重設)、且**只放寬「讀」**——寫入與 git 還原點仍只在被改的 repo 內,
-所以務必讓多出來的範圍維持**唯讀**,別讓 agent 去改別的專案(那裡沒有安全網)。
-> 預設仍建議 worktree(三家通用、來源隨 worktree 釘在某個 commit、用完即清);放寬可讀範圍是
-> 「我清楚自己用哪家 CLI」的人的捷徑。兩者可並存:常用的母目錄走可讀範圍,要釘版/要乾淨隔離的單一來源走 worktree。
+# 1) 在你的 code repo 開一個 workspace(=一份需求)
+python3 $FW/init-project.py /path/to/your-code-repo --name default
+cd /path/to/your-code-repo                  # ★引擎一律從 code repo 根目錄跑
+
+# 2) 填好 .loop/default/REQUIREMENTS.md(或讓 agent 訪談產出),你確認
+
+# 3) 跑
+python3 $FW/engine/run.py                    # gated(預設):規劃收斂 → 停下交你 review
+python3 $FW/engine/run.py --stage execute    #   review 完,手動接執行迴圈
+python3 $FW/engine/run.py --mode auto        # 或全自動:規劃收斂後直接接執行
+```
+> **`--mode`**(兩種):`gated` / `auto`。
+> **`--stage`**(執行哪一段):`all`(預設)/ `plan`(只生成)/ `execute`(只執行,gated review 完用這個)/ `reject`(樹模式局部重拆)。
+> **多份需求**:`init-project.py --name featureB` 再開一個,各自 `run.py --workspace featureB`(但別同時跑)。
+> 詳細輸出已直接印在終端機;背景執行才需要 `tail -f .loop/<name>/{plan,loop}.log`。
+
+---
 
 ## 完整流程圖（從 init-project 到收斂）
 
-> 上方 ①②③ 是高層次概念；這張圖把「實際會跑的指令、人類 gate 的位置、執行迴圈裡每輪疊了什麼防護」全部展開，方便第一次上手對齊心智模型。
+> 上面是高層次概念;這張圖把「實際會跑的指令、人類 gate 的位置、執行迴圈裡每輪疊了什麼防護」全部展開,
+> 方便第一次上手對齊心智模型。(機制細節在 `rules/`,這裡只給全貌。)
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -244,93 +186,20 @@ config / `AGENTS.md`、claude_code 用 `--add-dir` 或 settings、codex 用 sand
 2. **agent 是被「外部迴圈」反覆呼叫的無狀態 subprocess**,每輪一個全新 process,做完一個任務就 exit、把控制權交還引擎——這是「一輪一任務 + STEP 10 物理停機」設計的底層原因。
 3. **執行迴圈每輪疊了 7 層防護**(G0 自檢 / Git Review Gate / 停止判定 / 選模型 / watchdog / autocommit / 震盪偵測),agent 行為層之外還有完整的機器副防線。
 
-## 目錄
-```
-loop-engineering/            ← 共享、唯讀框架（不進任何 code repo）
-├── rules/                   規則區（通用方法論，技術中立）
-│   ├── BLUEPRINT.md             設計藍圖（九大原則、反模式）
-│   ├── boot-sequence.md         每輪開機程序（STEP G→10；含一輪一任務 + 物理停機鐵則）
-│   ├── git-safety.md            Git 安全網（只作用工作區；禁寫框架）
-│   ├── git-review-gate.md       獨立審查輪（每輪自動審 commit diff，破壞性改動自動 revert）
-│   ├── convergence.md           單任務收斂（不信單次；重推留痕、從嚴歸類）
-│   ├── completeness.md          大範圍防漏（列舉清單+行覆蓋；DEAD 需機械證據）
-│   ├── oscillation-escalation.md 震盪偵測 + 三層升級 + FROZEN
-│   ├── issues.md                Issue 分級 + 修正記錄
-│   ├── state-model.md           狀態/流程控制（N 階段、config 驅動）
-│   └── context-budget.md        ★Context 防爆（橫切硬約束）
-├── generators/              生成區（前期：需求 → 規劃書）
-│   ├── bootstrap.md             ★前期準備總入口（開 workspace + 訪談 + 確認，停在你跑 python 之前）
-│   ├── 0-requirements-interview.md / 1-plan-generator.md / 2-plan-review-gate.md
-│   └── templates/           CONTROL / PHASE / REQUIREMENTS / loop.config 樣板
-├── engine/                  引擎區（兩支迴圈 + 入口，config 驅動、N 階段）
-│   ├── plan_loop.py             ②規劃書生成收斂迴圈（code1）
-│   ├── loop.py                  ③執行收斂迴圈（code2）
-│   ├── prompts.yaml             agent 提示樣板（外部化；只指向 rules，不重述方法論）
-│   └── run.py                   入口：串接 ②③、提供 gated/auto 兩種模式
-├── maintenance/             框架開發期工具（不進 runtime 流程、不會 sync 進 user 專案）
-│   └── rule-loophole-audit.md   ★對抗式語意稽核 prompt：改完 rules/prompts 後，交給 agent 重複跑找「鑽空子」的縫
-├── init-project.py          腳手架：在 code repo 內建 .loop/<name>/、寫 framework_path（--name 開新需求）
-└── integrations/            選用整合範例（核心不依賴這裡的任何東西；未用對應 CLI 可整個忽略）
-    └── claude-code/             Claude Code 格式範例（無安裝腳本——由 agent 讀範例自己生成，見上節）
-        └── skills/loop-prep/SKILL.template.md   {{FRAMEWORK_PATH}} 代換後存到 ~/.claude/skills/ 即可用 /loop-prep
-```
+---
 
-## 四區
-> `<name>` = workspace 名稱 = 一份需求(`init-project.py --name <name>` 開的)，預設 `default`。
+## 其他你可能在意的
 
-| 區 | 放什麼 | 位置 |
-|----|--------|------|
-| 規則區 | 通用方法論 | 本框架 `rules/`（唯讀） |
-| 設定區 | 階段/門檻/模型/停止條件 | code repo `.loop/<name>/loop.config.yaml` |
-| 專屬規則區 | 狀態表/任務規格/coverage | code repo `.loop/<name>/CONTROL.md` + `phases/` |
-| 工作區 | 輸入/產出/log/活計數器 | code repo（產出 `src/` 跨 workspace 共用；分析文件 `.loop/<name>/docs/` 各 workspace 獨立） |
+- **要參考另一個專案的 code?**(如把舊專案 API refactor 進新專案):loop 只看得到被改的那個 repo。把來源用
+  `git worktree add ./.loop/<name>/inputs/old HEAD` 掛成**唯讀輸入**、`.gitignore` 掉、用完 `git worktree remove`。
+  (細節讓 agent 讀 `generators/0-requirements-interview.md` 的跨專案段帶你做。)
+- **東西放哪**:規劃書 / 狀態 / log 都在 code repo 的 `.loop/<name>/`;產出落 code repo。框架本身唯讀、絕不被寫入。
+- **跨專案總覽**:每次跑完自動更新 `~/.loop/index.md`(專案 / phase / 狀態 / 時間),一人多專案好追蹤。
 
-cascade：**框架預設 < 專案 `.loop/<name>/loop.config.yaml`**。
+---
 
-## 可靠性機制（兩個引擎共用，code 只讀設定/狀態）
-- **Preflight 健檢**：啟動先檢查佔位模型、`framework_path`、git repo、`build_cmd` 執行檔、REQUIREMENTS/CONTROL 是否存在；有錯誤直接擋下，不會空轉到 max_rounds 才發現設定沒填。
-- **三模型二維調度**：順風時按角色（thinking/normal/fast）指派模型，逆風時（卡住）沿階梯升級。
-- **硬 Breaker 防護**：`max_depth`、`max_leaves`、`max_leaf_reflow`、`growth_stall_rounds`，一旦撞線即凍結交人，程式不得自我放寬。
-- **Console echo**：agent 詳細輸出預設**直接印主控台**，不用另開視窗 `tail -f`；同時仍寫進 log 檔。`--quiet`/`LOOP_QUIET=1` 可關閉。
-- **震盪歷史持久化**：失敗指紋存 `.loop/<name>/.loop_state/fail_history`，loop 中斷重啟後接續判斷，不會因重啟而歸零震盪偵測。進度/活動標記同樣存 `.loop_state/progress`（跨重啟正確判進展、不誤判卡死）。
-- **無活動逃生門**：除了「不收斂 / 震盪」，引擎還偵測「連續多輪沒提交也沒推進計數器」（反覆被 watchdog 中斷、CLI 逾時、空轉），一樣走階梯升級到人類——壞掉的環境不會無聲燒到 `max_rounds` 才停。
-- **獨立 Plan Gate**：規劃書的「生成」與「審查」是兩個獨立 context 的 agent 呼叫（Round A / Round B），審查輪只審不生,避免同一個 agent 自己生、自己審的橡皮圖章問題。
-- **獨立 Git Review Gate**：執行迴圈每輪開始前,引擎自動把上一輪的 commit diff 交給**另一個獨立 context 的審查 agent**(見 `rules/git-review-gate.md`),抓中斷殘留、排版破壞、思考過程外洩、佔位符偷懶、衝突標記、計數器暴衝灌水等十條紅線——發現破壞性改動就**自動 revert**,致命級狀態檔毀損則停下交人。是 agent 行為層之外的機器副防線。
-- **單一啟動鎖（含心跳）**：同一份需求(workspace)不會被手滑啟動兩次(防呆/冪等;非並行機制——同 repo 一次只跑一個,見上節)。鎖檔每輪心跳更新,長跑(超過 1 小時)也不會被誤判成殘留而被第二個程序搶鎖並行。
-- **跨專案總覽**：每次 run 結束自動 upsert 一行到 `~/.loop/index.md`（專案/repo/workspace/phase/stuck/狀態/時間），一人多專案好追蹤。
+## 想深入（多半是讓 agent 去讀）
 
-## 快速開始
-
-**最快路徑**：把 `generators/bootstrap.md` 交給任何 agent(或 Claude Code 打 `/loop-prep`),
-它會幫你做完下面的 0~2 步,做完就停下來等你貼指令。以下是它背後實際做的事、也可以自己手動走：
-
-```bash
-# 0) 框架放在固定位置（本資料夾就是；或 clone 到 ~/.loop/framework）
-FW=<此框架路徑>
-pip install -r $FW/requirements.txt  # 安裝依賴（如 PyYAML）
-
-# 1) 在你的 code repo 初始化一個 workspace(=一份需求；建 .loop/<name>/、寫 framework_path、補 .gitignore)
-python3 $FW/init-project.py /path/to/your-code-repo --name default
-cd /path/to/your-code-repo            # ★所有引擎都從 repo 根目錄執行
-
-# 2) 階段①：填好 .loop/default/REQUIREMENTS.md（或用 generators/0 互動訪談產出），人類確認
-
-# 3) 一鍵跑（依 config.generation.mode；詳細輸出已直接印在這個終端機）
-python3 $FW/engine/run.py                      # gated（預設# ）：生成收斂→停下交你 review
-#   → review .loop/default/ 後執行：
-python3 $FW/engine/run.py --stage execute      # 開始實作執行迴圈
-#   或全自動：
-python3 $FW/engine/run.py --mode auto          # 生成收斂後自動接執行
-```
-> 也可分開跑:`python3 $FW/engine/plan_loop.py`（只生成）/ `python3 $FW/engine/loop.py`（只執行）；
-> 都吃同樣的 `--workspace`/`--quiet` 參數。想背景執行才需要 `tail -f .loop/default/{plan,loop}.log`。
-
-## 核心原則（為什麼這樣設計）
-- **文件即狀態**：換 agent / 換模型 / 中斷後，只靠 `.loop/` 就能接手。
-- **每輪只做一件事**：agent 每次被喚醒只推進【單一一個】任務或【單一一次】驗證,做完即停機交還外部迴圈;穩定交棒 > 一次衝完(防多工幻覺與生命週期失控)。
-- **不信單次**：收斂協定（獨立重推 + 連續 N 次一致；重推稿留痕可稽核、有疑義一律從嚴）。
-- **不會漏看**：列舉清單（分母）+ 行覆蓋 + 集合穩定收斂（DEAD 狀態需機械式零引用證據）。
-- **卡死有逃生門**：震盪偵測 → 二維調度升級 → FROZEN → 交人類。
-- **授權紅線**：程式只判斷客觀數據（如輪數、深度），價值判斷與 Breaker 放寬一律交人類。
-- **Git 是安全網**：一輪一 commit（只在工作區）；框架唯讀、絕不寫入。
-- **Context 防爆**：log 不進 context、CONTROL 保持決策最小集、不整批讀資料。
+- **為什麼這樣設計**(九大原則、反模式):[`rules/BLUEPRINT.md`](rules/BLUEPRINT.md)
+- **運作細節 / 每輪防護 / 收斂與防漏協定**:[`rules/`](rules/)(boot-sequence、convergence、completeness、oscillation-escalation、git-safety、git-review-gate、context-budget…)
+- **agent 入口 / 前期準備一條龍**:[`generators/bootstrap.md`](generators/bootstrap.md)
