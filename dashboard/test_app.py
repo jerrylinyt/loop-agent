@@ -189,4 +189,138 @@ def test_download_log_endpoint(monkeypatch):
         response_invalid = client.get(f"/api/projects/{proj_id}/logs/invalid_type/download")
         assert response_invalid.status_code == 400
 
+def test_d_features_activity_categorization():
+    from dashboard.app import ACTIVITY_CLASSIFICATION_RULES, parse_timestamp
+    
+    # Test timestamp parsing
+    ts, text = parse_timestamp("2026-06-27 22:00:01 ✅ LOOP COMPLETE")
+    assert ts == "2026-06-27 22:00:01"
+    assert text == "✅ LOOP COMPLETE"
+    
+    # Test line categorization rules
+    lines_and_types = [
+        ("2026-06-27 22:00:01 ✅ LOOP COMPLETE", "complete"),
+        ("2026-06-27 22:00:01 🚨 [Git Review Gate] REVERT", "review_revert"),
+        ("2026-06-27 22:00:01 ⛔ 停下交人類", "human_required"),
+        ("2026-06-27 22:00:01 升級模型", "model_upgrade"),
+        ("2026-06-27 22:00:01 ↩ 有進展", "progress"),
+        ("2026-06-27 22:00:01 🍃 收斂", "leaf_converged")
+    ]
+    
+    for line, expected_type in lines_and_types:
+        matched = None
+        for act_type, check_fn in ACTIVITY_CLASSIFICATION_RULES:
+            if check_fn(line):
+                matched = act_type
+                break
+        assert matched == expected_type, f"Failed for line: {line}"
+
+def test_d_features_d4_heartbeat(monkeypatch):
+    import time
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_path = os.path.join(tmpdir, "my-repo")
+        os.makedirs(os.path.join(repo_path, ".loop", "default", ".loop_state"), exist_ok=True)
+        
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("# Loop 專案總覽（自動維護）\n\n")
+            f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
+            f.write("|------|------|-----------|-------|-------|------|------|\n")
+            f.write(f"| my-repo | {repo_path} | default | 1 | 0 | tracked | t |\n")
+            
+        monkeypatch.setattr("dashboard.app.get_index_path", lambda: index_path)
+        
+        # Write run.lock
+        lock_path = os.path.join(repo_path, ".loop", "default", ".loop_state", "run.lock")
+        with open(lock_path, "w", encoding="utf-8") as lf:
+            lf.write("pid=12345 started=2026-06-27 22:00:00\n")
+            
+        # Parse index and check D4 fields
+        projects = parse_index()
+        assert len(projects) == 1
+        assert projects[0]["started_at"] == "2026-06-27 22:00:00"
+        assert projects[0]["heartbeat_age"] is not None
+        assert projects[0]["heartbeat_age"] >= 0
+
+def test_d_features_d7_doc_restrictions(monkeypatch):
+    from fastapi.testclient import TestClient
+    from dashboard.app import app
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_path = os.path.join(tmpdir, "my-repo")
+        os.makedirs(os.path.join(repo_path, ".loop", "default", "tree"), exist_ok=True)
+        os.makedirs(os.path.join(repo_path, ".loop", "default", "phases"), exist_ok=True)
+        
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("# Loop 專案總覽（自動維護）\n\n")
+            f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
+            f.write("|------|------|-----------|-------|-------|------|------|\n")
+            f.write(f"| my-repo | {repo_path} | default | 1 | 0 | tracked | t |\n")
+            
+        monkeypatch.setattr("dashboard.app.get_index_path", lambda: index_path)
+        
+        # Create whitelist files
+        req_path = os.path.join(repo_path, ".loop", "default", "REQUIREMENTS.md")
+        with open(req_path, "w", encoding="utf-8") as f:
+            f.write("Target Requirements Content")
+            
+        node_path = os.path.join(repo_path, ".loop", "default", "tree", "n1.decomp.md")
+        with open(node_path, "w", encoding="utf-8") as f:
+            f.write("Node Spec Content")
+            
+        projects = parse_index()
+        proj_id = projects[0]["id"]
+        
+        client = TestClient(app)
+        
+        # Test whitelisted file
+        r1 = client.get(f"/api/projects/{proj_id}/doc?path=REQUIREMENTS.md")
+        assert r1.status_code == 200
+        assert r1.json()["content"] == "Target Requirements Content"
+        
+        r2 = client.get(f"/api/projects/{proj_id}/doc?path=tree/n1.decomp.md")
+        assert r2.status_code == 200
+        assert r2.json()["content"] == "Node Spec Content"
+        
+        # Test non-whitelisted path (even if it exists)
+        non_white = os.path.join(repo_path, ".loop", "default", "secret.txt")
+        with open(non_white, "w") as f:
+            f.write("secret")
+        r3 = client.get(f"/api/projects/{proj_id}/doc?path=secret.txt")
+        assert r3.status_code == 403
+        
+        # Test path traversal block
+        r4 = client.get(f"/api/projects/{proj_id}/doc?path=../../../../etc/passwd")
+        assert r4.status_code in [400, 403]
+
+def test_d_features_d5_diff_fallback(monkeypatch):
+    from fastapi.testclient import TestClient
+    from dashboard.app import app
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_path = os.path.join(tmpdir, "my-repo")
+        os.makedirs(os.path.join(repo_path, ".loop", "default", ".loop_state"), exist_ok=True)
+        
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("# Loop 專案總覽（自動維護）\n\n")
+            f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
+            f.write("|------|------|-----------|-------|-------|------|------|\n")
+            f.write(f"| my-repo | {repo_path} | default | 1 | 0 | tracked | t |\n")
+            
+        monkeypatch.setattr("dashboard.app.get_index_path", lambda: index_path)
+        
+        projects = parse_index()
+        proj_id = projects[0]["id"]
+        
+        client = TestClient(app)
+        
+        # Test diff endpoint without git repo - should fall back and not crash, returning empty diff
+        response = client.get(f"/api/projects/{proj_id}/diff")
+        assert response.status_code == 200
+        data = response.json()
+        assert "diff" in data
+        assert data["diff"] == ""
+
 

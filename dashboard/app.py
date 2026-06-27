@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import asyncio
 import subprocess
 import psutil
@@ -31,6 +32,8 @@ class ProjectStatus(BaseModel):
     pid: Optional[int] = None
     config_path: str
     stale_lock: bool = False
+    started_at: Optional[str] = None
+    heartbeat_age: Optional[int] = None
 
 class StartRequest(BaseModel):
     mode: str = "auto"
@@ -159,19 +162,58 @@ def parse_control_file(control_path: str) -> dict:
                         phase_ids.add(pm.group(1))
     except Exception:
         pass
+    # Load loop.config.yaml thresholds
+    config_path = os.path.join(os.path.dirname(control_path), "loop.config.yaml")
+    thresholds = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as cf:
+                config_data = yaml.safe_load(cf)
+                if isinstance(config_data, dict):
+                    phases_conf = config_data.get("phases", [])
+                    if isinstance(phases_conf, list):
+                        for p_conf in phases_conf:
+                            if isinstance(p_conf, dict) and "id" in p_conf:
+                                p_id = str(p_conf["id"])
+                                thresholds[p_id] = p_conf.get("converge_threshold")
+        except Exception:
+            pass
+
     phases_list = []
     for pid in sorted(phase_ids, key=int):
         consec = data.get(f"p{pid}_consecutive_pass")
         tot = data.get(f"p{pid}_total_validations")
         last_res = data.get(f"p{pid}_last_result")
+        threshold_val = thresholds.get(pid)
         phases_list.append({
             "id": pid,
             "consecutive_pass": consec if consec is not None else "0",
             "total_validations": tot if tot is not None else "0",
-            "last_result": last_res if last_res is not None else "N/A"
+            "last_result": last_res if last_res is not None else "N/A",
+            "threshold": threshold_val
         })
     data["phases"] = phases_list
     return data
+
+import re
+TIMESTAMP_REGEX = re.compile(r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})")
+
+def parse_timestamp(line: str) -> tuple[str, str]:
+    m = TIMESTAMP_REGEX.match(line)
+    if m:
+        ts = m.group(1)
+        text = line[len(ts):].strip()
+        return ts, text
+    return "", line.strip()
+
+ACTIVITY_CLASSIFICATION_RULES = [
+    ("complete", lambda l: "LOOP COMPLETE" in l or "TREE EXECUTE COMPLETE" in l),
+    ("review_revert", lambda l: "Git Review Gate" in l and "🚨" in l),
+    ("human_required", lambda l: "停下交人類" in l or "human_required" in l or "⛔" in l or "🧑‍⚖️" in l),
+    ("model_upgrade", lambda l: "升級模型" in l or "⬆" in l or "⬆⬆" in l),
+    ("progress", lambda l: "↩ 有進展" in l),
+    ("leaf_converged", lambda l: "🍃" in l and "收斂" in l),
+]
 
 def index_row_matches(line: str, repo_path: str, workspace: str) -> bool:
     """是否為對應 (repo_path, workspace) 的 index.md 資料列。
@@ -226,15 +268,24 @@ def parse_index():
                     is_running = False
                     pid = None
                     stale_lock = False
+                    started_at = None
+                    heartbeat_age = None
                     lock_path = os.path.join(repo_path, ".loop", ws, ".loop_state", "run.lock")
                     if os.path.exists(lock_path):
                         is_running = True
                         try:
                             with open(lock_path, "r", encoding="utf-8") as lf:
-                                lock_data = lf.read()
+                                lock_data = lf.read().strip()
                                 # pid=1234 started=...
                                 if lock_data.startswith("pid="):
-                                    pid = int(lock_data.split(" ")[0].split("=")[1])
+                                    pid_part = lock_data.split(" ")[0]
+                                    pid = int(pid_part.split("=")[1])
+                                if "started=" in lock_data:
+                                    started_at = lock_data.split("started=", 1)[1].strip()
+                        except Exception:
+                            pass
+                        try:
+                            heartbeat_age = int(time.time() - os.path.getmtime(lock_path))
                         except Exception:
                             pass
                     
@@ -263,7 +314,9 @@ def parse_index():
                         "is_running": is_running,
                         "pid": pid,
                         "config_path": os.path.join(repo_path, ".loop", ws, "loop.config.yaml"),
-                        "stale_lock": stale_lock
+                        "stale_lock": stale_lock,
+                        "started_at": started_at,
+                        "heartbeat_age": heartbeat_age
                     })
     except Exception as e:
         print(f"Error reading index: {e}")
@@ -768,6 +821,146 @@ def download_log(proj_id: str, log_type: str):
         raise HTTPException(status_code=404, detail="Log file not found")
         
     return FileResponse(log_path, media_type="text/plain", filename=f"{proj['repo_name']}-{proj['workspace']}-{log_file}")
+
+@app.get("/api/projects/{proj_id}/activity")
+def get_activity(proj_id: str, limit: int = 50):
+    proj = get_project_by_id(proj_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "loop.log")
+    if not os.path.exists(log_path):
+        return []
+        
+    lines = get_last_n_lines(log_path, 600)
+    events = []
+    
+    for line in reversed(lines):
+        line_str = line.strip()
+        if not line_str:
+            continue
+            
+        matched_type = None
+        for act_type, check_fn in ACTIVITY_CLASSIFICATION_RULES:
+            if check_fn(line_str):
+                matched_type = act_type
+                break
+                
+        if matched_type:
+            ts, text = parse_timestamp(line_str)
+            events.append({
+                "ts": ts,
+                "type": matched_type,
+                "text": text
+            })
+            if len(events) >= limit:
+                break
+                
+    return events
+
+import fnmatch
+
+@app.get("/api/projects/{proj_id}/doc")
+def get_project_doc(proj_id: str, path: str):
+    proj = get_project_by_id(proj_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    repo = proj["repo"]
+    ws = proj["workspace"]
+    
+    base_dir = os.path.realpath(os.path.join(repo, ".loop", ws))
+    target_path = os.path.realpath(os.path.join(base_dir, path))
+    
+    try:
+        common = os.path.commonpath([base_dir, target_path])
+        if common != base_dir:
+            raise HTTPException(status_code=403, detail="Path traversal detected")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path structure")
+        
+    rel_path = os.path.relpath(target_path, base_dir)
+    normalized_rel = rel_path.replace(os.sep, "/")
+    
+    is_whitelisted = False
+    if normalized_rel == "REQUIREMENTS.md":
+        is_whitelisted = True
+    elif fnmatch.fnmatch(normalized_rel, "phases/PHASE*.md"):
+        is_whitelisted = True
+    elif fnmatch.fnmatch(normalized_rel, "tree/*.decomp.md"):
+        is_whitelisted = True
+        
+    if not is_whitelisted:
+        raise HTTPException(status_code=403, detail="Access denied for the requested path")
+        
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="Requested document not found")
+        
+    try:
+        with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return {
+            "path": normalized_rel,
+            "content": content
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
+
+@app.get("/api/projects/{proj_id}/diff")
+def get_project_diff(proj_id: str):
+    proj = get_project_by_id(proj_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    repo = proj["repo"]
+    ws = proj["workspace"]
+    
+    sha_path = os.path.join(repo, ".loop", ws, ".loop_state", "last_safe_sha")
+    base_sha = None
+    if os.path.exists(sha_path):
+        try:
+            with open(sha_path, "r", encoding="utf-8") as sf:
+                base_sha = sf.read().strip()
+        except Exception:
+            pass
+            
+    head_sha = None
+    try:
+        r = subprocess.run(["git", "-C", repo, "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True)
+        head_sha = r.stdout.strip()
+    except Exception:
+        pass
+        
+    diff_content = ""
+    resolved_base = base_sha
+    
+    if resolved_base:
+        try:
+            r = subprocess.run(["git", "-C", repo, "diff", resolved_base, "HEAD"], capture_output=True, text=True, check=True)
+            diff_content = r.stdout
+        except Exception:
+            resolved_base = None
+            
+    if not resolved_base:
+        try:
+            r = subprocess.run(["git", "-C", repo, "diff", "HEAD~1", "HEAD"], capture_output=True, text=True, check=True)
+            diff_content = r.stdout
+            resolved_base = "HEAD~1"
+        except Exception:
+            resolved_base = None
+            
+    limit = 400 * 1024
+    truncated = False
+    if len(diff_content) > limit:
+        diff_content = diff_content[:limit] + "\n...[truncated]"
+        truncated = True
+        
+    return {
+        "base": resolved_base,
+        "head": head_sha,
+        "diff": diff_content,
+        "truncated": truncated
+    }
 
 @app.get("/")
 def serve_index():

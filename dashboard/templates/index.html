@@ -94,20 +94,31 @@
 <body class="bg-gray-900 text-white min-h-screen">
     <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4 flex justify-between items-center">
         <h1 class="text-2xl font-bold text-blue-400">Loop Engineering Dashboard</h1>
-        <div id="global-summary" class="flex items-center gap-3 text-sm">
-            <span class="text-gray-400">Total <span id="sum-total" class="text-white font-bold">0</span></span>
-            <span class="px-2 py-0.5 bg-green-700 text-white rounded">Running <span id="sum-running" class="font-bold">0</span></span>
-            <span class="px-2 py-0.5 bg-yellow-700 text-white rounded">Action <span id="sum-action" class="font-bold">0</span></span>
-            <span class="px-2 py-0.5 bg-emerald-700 text-white rounded">Complete <span id="sum-complete" class="font-bold">0</span></span>
+        <div class="flex items-center gap-4">
+            <!-- Notification Toggle -->
+            <button id="btn-notification-toggle" onclick="toggleNotifications()" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 transition">
+                <span id="notification-icon">🔔</span>
+                <span id="notification-text">Enable notifications</span>
+            </button>
+            <div id="global-summary" class="flex items-center gap-3 text-sm">
+                <span class="text-gray-400">Total <span id="sum-total" class="text-white font-bold">0</span></span>
+                <span class="px-2 py-0.5 bg-green-700 text-white rounded">Running <span id="sum-running" class="font-bold">0</span></span>
+                <span class="px-2 py-0.5 bg-yellow-700 text-white rounded">Action <span id="sum-action" class="font-bold">0</span></span>
+                <span class="px-2 py-0.5 bg-emerald-700 text-white rounded">Complete <span id="sum-complete" class="font-bold">0</span></span>
+            </div>
         </div>
     </nav>
 
     <div class="container mx-auto px-6 py-8 flex gap-6">
         <!-- Sidebar: Project List -->
         <div class="w-1/3">
-            <div class="flex justify-between items-center mb-4">
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <h2 class="text-xl font-semibold text-gray-300">Projects & Workspaces</h2>
-                <div class="flex gap-1">
+                <div class="flex gap-1 items-center">
+                    <div class="inline-flex rounded-md shadow-sm mr-2" role="group">
+                        <button id="btn-view-list" onclick="setSidebarLayout('list')" class="px-2.5 py-1 bg-blue-600 text-white rounded-l text-xs font-semibold focus:outline-none transition">List</button>
+                        <button id="btn-view-grid" onclick="setSidebarLayout('grid')" class="px-2.5 py-1 bg-gray-700 hover:bg-gray-650 text-gray-300 rounded-r text-xs font-semibold focus:outline-none transition">Grid</button>
+                    </div>
                     <button onclick="showInitModal()" class="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm transition">+ Init</button>
                     <button onclick="showTrackModal()" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm transition">+ Track</button>
                 </div>
@@ -145,8 +156,12 @@
                             <h2 class="text-2xl font-bold text-white" id="ws-title">Repo / Workspace</h2>
                             <span id="ws-status-badge" class="px-2 py-0.5 rounded text-xs font-semibold"></span>
                             <span id="ws-stale-badge" class="px-2 py-0.5 bg-yellow-600 text-white rounded text-xs font-bold" style="display:none;">⚠️ Stale Lock</span>
+                            <span id="ws-running-info" class="text-xs text-gray-300 font-mono" style="display:none;"></span>
                         </div>
-                        <p class="text-sm text-gray-400 mt-1" id="ws-path">/path/to/repo</p>
+                        <div class="text-sm text-gray-400 mt-1 flex items-center gap-3">
+                            <span id="ws-path">/path/to/repo</span>
+                            <button onclick="viewDoc('REQUIREMENTS.md')" class="px-2 py-0.5 bg-gray-700 hover:bg-gray-650 text-gray-300 rounded text-xs transition font-semibold">📋 View REQUIREMENTS.md</button>
+                        </div>
                     </div>
                     <div class="space-x-2 flex items-center">
                         <button id="btn-clear-lock" onclick="clearLock()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded font-medium transition" style="display:none;">Clear Lock</button>
@@ -170,7 +185,7 @@
                         <span class="text-xs text-gray-400 uppercase tracking-wider">Phase</span>
                         <div class="text-lg font-semibold" id="ws-phase">-</div>
                     </div>
-                    <div class="bg-gray-700 p-3 rounded">
+                    <div class="bg-gray-700 p-3 rounded" id="card-ws-stuck">
                         <span class="text-xs text-gray-400 uppercase tracking-wider">Stuck Level</span>
                         <div class="text-lg font-semibold" id="ws-stuck">-</div>
                     </div>
@@ -186,6 +201,7 @@
                 <nav class="-mb-px flex space-x-8">
                     <button onclick="switchTab('overview')" id="tab-overview" class="border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Overview / 狀態</button>
                     <button onclick="switchTab('logs')" id="tab-logs" class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Live Logs</button>
+                    <button onclick="switchTab('changes')" id="tab-changes" class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Changes</button>
                     <button onclick="switchTab('config')" id="tab-config" class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">loop.config.yaml</button>
                     <button onclick="switchTab('tree')" id="tab-tree" class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm" style="display: none;">Planning Tree</button>
                 </nav>
@@ -207,7 +223,7 @@
                         <span class="text-xs text-gray-400 uppercase font-semibold">Enhanced Rounds Used</span>
                         <div id="ctrl-enhanced-rounds" class="text-xl font-bold text-teal-400 mt-1">-</div>
                     </div>
-                    <div class="bg-gray-700 p-4 rounded shadow-sm">
+                    <div class="bg-gray-700 p-4 rounded shadow-sm" id="card-rounds-since">
                         <span class="text-xs text-gray-400 uppercase font-semibold">Rounds Since Progress</span>
                         <div id="ctrl-rounds-since" class="text-xl font-bold text-yellow-400 mt-1">-</div>
                     </div>
@@ -249,6 +265,30 @@
                             </tbody>
                         </table>
                     </div>
+                </div>
+
+                <!-- Activity Timeline -->
+                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-sm mt-6">
+                    <h3 class="text-lg font-bold text-gray-300 mb-4 flex items-center gap-2">
+                        <span>Timeline / 活動時間軸</span>
+                    </h3>
+                    <div id="activity-timeline" class="relative pl-6 border-l-2 border-gray-700 space-y-4 max-h-96 overflow-y-auto">
+                        <div class="text-gray-500 text-sm">No activity events found in loop.log.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Content: Changes -->
+            <div id="content-changes" style="display: none;" class="space-y-4">
+                <div class="flex justify-between items-center bg-gray-750 p-3 rounded-lg border border-gray-700">
+                    <div class="text-xs text-gray-400 font-mono">
+                        Base SHA: <span id="diff-base" class="text-white font-semibold"></span> &nbsp;|&nbsp; 
+                        HEAD SHA: <span id="diff-head" class="text-white font-semibold"></span>
+                    </div>
+                    <button onclick="loadDiffData()" class="px-3 py-1 bg-gray-700 hover:bg-gray-650 text-white rounded text-xs font-semibold transition">🔄 Refresh</button>
+                </div>
+                <div id="diff-window" class="p-4 bg-gray-900 border border-gray-700 rounded-lg overflow-x-auto text-xs font-mono whitespace-pre max-h-[600px] text-gray-300">
+                    <!-- Diff populated dynamically -->
                 </div>
             </div>
 
@@ -293,7 +333,8 @@
                                 <div><span class="text-gray-400 font-semibold">Reflow Count:</span> <span id="nd-reflow" class="text-gray-200"></span></div>
                             </div>
                         </div>
-                        <div id="node-details-actions" style="display: none;" class="pt-4 border-t border-gray-700">
+                        <div id="node-details-actions" style="display: none;" class="pt-4 border-t border-gray-700 flex flex-col gap-2">
+                            <button id="btn-view-spec" onclick="viewNodeSpec()" class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition">View Spec</button>
                             <button id="btn-reject" onclick="rejectSubtree()" class="w-full px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded font-medium transition">Reject & Replan Subtree</button>
                         </div>
                     </div>
@@ -302,7 +343,21 @@
         </div>
     </div>
 
-    <!-- Init Modal -->
+    <!-- Doc View Modal -->
+    <div id="doc-modal" class="fixed inset-0 bg-black bg-opacity-65 flex items-center justify-center" style="display: none; z-index: 100;">
+        <div class="bg-gray-800 p-6 rounded-lg w-2/3 border border-gray-700 max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                    <span>📄 Document Viewer:</span>
+                    <span id="doc-modal-title" class="text-sm font-mono text-gray-400 font-normal"></span>
+                </h2>
+                <button onclick="hideDocModal()" class="text-gray-450 hover:text-white font-bold text-lg px-2 py-1 rounded hover:bg-gray-750 transition">✕</button>
+            </div>
+            <div class="flex-1 overflow-auto bg-gray-900 border border-gray-750 p-4 rounded-lg text-sm text-gray-305 font-mono whitespace-pre-wrap text-left" id="doc-modal-content">
+                <!-- Content populated dynamically -->
+            </div>
+        </div>
+    </div>
     <div id="init-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style="display: none;">
         <div class="bg-gray-800 p-6 rounded-lg w-1/3 border border-gray-700">
             <h2 class="text-xl font-bold text-white mb-4">Init New Workspace</h2>
@@ -343,11 +398,150 @@
     <script>
         let currentProjectId = null;
         let eventSource = null;
+
+        function formatDuration(sec) {
+            if (sec < 60) return `${sec}s`;
+            const m = Math.floor(sec / 60);
+            const s = sec % 60;
+            if (m < 60) return `${m}m ${s}s`;
+            const h = Math.floor(m / 60);
+            const rm = m % 60;
+            return `${h}h ${rm}m`;
+        }
         let currentTreeNodes = [];
         let selectedNodeId = null;
         let lastProjectsSig = null;
+        let sidebarLayout = 'list';
+
+        function setSidebarLayout(layout) {
+            sidebarLayout = layout;
+            const btnList = document.getElementById('btn-view-list');
+            const btnGrid = document.getElementById('btn-view-grid');
+            if (!btnList || !btnGrid) return;
+            if (layout === 'grid') {
+                btnGrid.className = "px-2.5 py-1 bg-blue-600 text-white rounded-r text-xs font-semibold focus:outline-none transition";
+                btnList.className = "px-2.5 py-1 bg-gray-700 hover:bg-gray-650 text-gray-300 rounded-l text-xs font-semibold focus:outline-none transition";
+            } else {
+                btnList.className = "px-2.5 py-1 bg-blue-600 text-white rounded-l text-xs font-semibold focus:outline-none transition";
+                btnGrid.className = "px-2.5 py-1 bg-gray-700 hover:bg-gray-650 text-gray-300 rounded-r text-xs font-semibold focus:outline-none transition";
+            }
+            lastProjectsSig = null;
+            fetchProjects();
+        }
         let currentLogType = 'loop';
         const MAX_LOG_LINES = 2000;
+
+        let prevStatusById = {};
+        let notificationsEnabled = localStorage.getItem('loop_notify') === 'true';
+
+        function initNotifications() {
+            const btn = document.getElementById('btn-notification-toggle');
+            if (!btn) return;
+            if (Notification.permission === 'denied') {
+                btn.style.display = 'none';
+                return;
+            }
+            if (Notification.permission === 'granted') {
+                if (localStorage.getItem('loop_notify') === null) {
+                    localStorage.setItem('loop_notify', 'true');
+                    notificationsEnabled = true;
+                }
+            }
+            updateNotificationButton();
+        }
+
+        function updateNotificationButton() {
+            const btn = document.getElementById('btn-notification-toggle');
+            const icon = document.getElementById('notification-icon');
+            const text = document.getElementById('notification-text');
+            if (!btn) return;
+            if (Notification.permission === 'granted' && notificationsEnabled) {
+                icon.innerText = '🔕';
+                text.innerText = 'Disable notifications';
+                btn.className = "px-3 py-1 bg-gray-700 hover:bg-gray-650 text-gray-300 rounded text-xs font-semibold flex items-center gap-1.5 transition";
+            } else {
+                icon.innerText = '🔔';
+                text.innerText = 'Enable notifications';
+                btn.className = "px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 transition";
+            }
+        }
+
+        async function toggleNotifications() {
+            if (Notification.permission === 'default') {
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    localStorage.setItem('loop_notify', 'true');
+                    notificationsEnabled = true;
+                } else {
+                    localStorage.setItem('loop_notify', 'false');
+                    notificationsEnabled = false;
+                }
+            } else if (Notification.permission === 'granted') {
+                notificationsEnabled = !notificationsEnabled;
+                localStorage.setItem('loop_notify', notificationsEnabled ? 'true' : 'false');
+            }
+            updateNotificationButton();
+        }
+
+        function checkStatusTransitions(projects) {
+            const isFirstLoad = Object.keys(prevStatusById).length === 0;
+
+            projects.forEach(p => {
+                const id = p.id;
+                const current = {
+                    status: p.status,
+                    is_running: p.is_running,
+                    stuck: parseInt(p.stuck) || 0,
+                    repo_name: p.repo_name,
+                    workspace: p.workspace,
+                    p_obj: p
+                };
+
+                if (!isFirstLoad && prevStatusById[id]) {
+                    const prev = prevStatusById[id];
+                    let triggerNotify = false;
+                    let title = '';
+                    let body = '';
+
+                    if (current.status === 'human_required' && prev.status !== 'human_required') {
+                        triggerNotify = true;
+                        title = `⚠️ Action Needed: ${current.repo_name}/${current.workspace}`;
+                        body = `Project requires human intervention.`;
+                    }
+                    else if ((current.status === 'complete' || current.status === 'done') && 
+                             (prev.status !== 'complete' && prev.status !== 'done')) {
+                        triggerNotify = true;
+                        title = `✅ Complete: ${current.repo_name}/${current.workspace}`;
+                        body = `Project has finished execution successfully.`;
+                    }
+                    else if (prev.is_running && !current.is_running && current.status !== 'complete' && current.status !== 'done') {
+                        triggerNotify = true;
+                        title = `🛑 Stopped: ${current.repo_name}/${current.workspace}`;
+                        body = `Execution stopped (possible failure or cancelled).`;
+                    }
+                    else if (current.stuck > prev.stuck) {
+                        triggerNotify = true;
+                        title = `⚡ Stuck Level Up: ${current.repo_name}/${current.workspace}`;
+                        body = `Stuck level increased from ${prev.stuck} to ${current.stuck}.`;
+                    }
+
+                    if (triggerNotify && notificationsEnabled && Notification.permission === 'granted') {
+                        try {
+                            const n = new Notification(title, {
+                                body: body
+                            });
+                            n.onclick = () => {
+                                window.focus();
+                                selectProject(current.p_obj);
+                            };
+                        } catch (err) {
+                            console.error("Failed to fire desktop notification:", err);
+                        }
+                    }
+                }
+                prevStatusById[id] = current;
+            });
+        }
 
         function showInitModal() {
             document.getElementById('init-modal').style.display = 'flex';
@@ -425,16 +619,22 @@
 
         function renderProjectList(projects) {
             updateGlobalSummary(projects);
+            checkStatusTransitions(projects);
 
             // C1: skip the list rebuild when nothing visible changed (kills the 5s flicker).
             const sig = JSON.stringify(projects.map(p =>
-                [p.id, p.status, p.is_running, p.stale_lock, p.phase, p.stuck]
-            )) + '|' + currentProjectId;
+                [p.id, p.status, p.is_running, p.stale_lock, p.phase, p.stuck, p.started_at, p.heartbeat_age]
+            )) + '|' + currentProjectId + '|' + sidebarLayout;
             if (sig === lastProjectsSig) return;
             lastProjectsSig = sig;
 
             const listDiv = document.getElementById('project-list');
             listDiv.innerHTML = '';
+            if (sidebarLayout === 'grid') {
+                listDiv.className = "grid grid-cols-1 md:grid-cols-2 gap-4";
+            } else {
+                listDiv.className = "space-y-4";
+            }
 
             if (projects.length === 0) {
                 listDiv.innerHTML = '<div class="text-gray-500">No projects found in index.md</div>';
@@ -463,6 +663,24 @@
                     staleBadge = `<span class="ml-2 px-1.5 py-0.5 bg-yellow-600 text-white rounded text-[10px] font-bold">⚠️ Stale Lock</span>`;
                 }
 
+                let runningInfo = '';
+                if (isRunning && p.started_at) {
+                    const startMs = Date.parse(p.started_at.replace(/-/g, '/'));
+                    const diffSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+                    const durStr = formatDuration(diffSec);
+                    let hbStr = '';
+                    let hbClass = 'text-gray-400';
+                    let hbTitle = '';
+                    if (p.heartbeat_age !== null && p.heartbeat_age !== undefined) {
+                        hbStr = ` · ♥ ${p.heartbeat_age}s ago`;
+                        if (p.heartbeat_age > 1800) {
+                            hbClass = 'text-red-500 font-bold animate-pulse';
+                            hbTitle = 'Possible Stall';
+                        }
+                    }
+                    runningInfo = `<div class="text-[10px] ${hbClass} mt-1" title="${hbTitle}">⏱ running ${durStr}${hbStr}</div>`;
+                }
+
                 const card = document.createElement('div');
                 card.className = `p-4 bg-gray-800 rounded-lg cursor-pointer border hover:border-blue-500 transition ${currentProjectId === p.id ? 'border-blue-500 bg-gray-750' : 'border-gray-700'}`;
                 card.onclick = () => selectProject(p);
@@ -472,6 +690,7 @@
                         <div>
                             <div class="font-bold text-lg text-white flex items-center gap-1">${p.repo_name}${staleBadge}</div>
                             <div class="text-xs text-gray-400 font-mono">${p.workspace}</div>
+                            ${runningInfo}
                         </div>
                         <div class="flex items-center gap-2">
                             <span class="px-2 py-0.5 rounded text-xs font-semibold ${badgeClass}">${statusLabel}</span>
@@ -480,7 +699,7 @@
                     </div>
                     <div class="grid grid-cols-2 gap-2 text-xs text-gray-400 pt-2 border-t border-gray-700">
                         <div>Phase: <span class="text-gray-200 font-semibold">${p.phase}</span></div>
-                        <div>Stuck: <span class="text-gray-200 font-semibold">${p.stuck}</span></div>
+                        <div>Stuck: <span class="${stuckClass} font-semibold">${stuckVal === 0 ? '0' : stuckVal + ' ⚠️'}</span></div>
                     </div>
                 `;
                 listDiv.appendChild(card);
@@ -536,12 +755,60 @@
                 document.getElementById('ws-stale-badge').style.display = 'none';
             }
 
+            const wsStuck = document.getElementById('ws-stuck');
+            const cardWsStuck = document.getElementById('card-ws-stuck');
+            const stuckVal = parseInt(p.stuck) || 0;
+            if (cardWsStuck && wsStuck) {
+                if (p.status === 'human_required' || p.status === 'FROZEN') {
+                    cardWsStuck.className = "bg-red-950 border border-red-500/50 p-3 rounded";
+                    wsStuck.className = "text-lg font-bold text-red-500 animate-pulse";
+                    wsStuck.innerText = `${stuckVal} ⚠️`;
+                } else if (stuckVal >= 2) {
+                    cardWsStuck.className = "bg-orange-950 border border-orange-500/50 p-3 rounded";
+                    wsStuck.className = "text-lg font-bold text-orange-500 animate-pulse";
+                    wsStuck.innerText = `${stuckVal} ⚠️`;
+                } else if (stuckVal === 1) {
+                    cardWsStuck.className = "bg-yellow-900/60 border border-yellow-600/40 p-3 rounded";
+                    wsStuck.className = "text-lg font-semibold text-yellow-400";
+                    wsStuck.innerText = `${stuckVal} ⚠️`;
+                } else {
+                    cardWsStuck.className = "bg-gray-700 p-3 rounded";
+                    wsStuck.className = "text-lg font-semibold text-white";
+                    wsStuck.innerText = stuckVal;
+                }
+            }
+
+            const wsRunningInfo = document.getElementById('ws-running-info');
+            if (isRunning && p.started_at) {
+                const startMs = Date.parse(p.started_at.replace(/-/g, '/'));
+                const diffSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+                const durStr = formatDuration(diffSec);
+                let hbStr = '';
+                if (p.heartbeat_age !== null && p.heartbeat_age !== undefined) {
+                    hbStr = ` · Heartbeat ${p.heartbeat_age}s ago`;
+                    if (p.heartbeat_age > 1800) {
+                        wsRunningInfo.className = "text-xs text-red-500 font-bold animate-pulse";
+                        wsRunningInfo.innerText = `⏱ running ${durStr}${hbStr} (⚠️ Possible Stall)`;
+                    } else {
+                        wsRunningInfo.className = "text-xs text-gray-300 font-mono";
+                        wsRunningInfo.innerText = `⏱ running ${durStr}${hbStr}`;
+                    }
+                } else {
+                    wsRunningInfo.className = "text-xs text-gray-300 font-mono";
+                    wsRunningInfo.innerText = `⏱ running ${durStr}`;
+                }
+                wsRunningInfo.style.display = 'inline-block';
+            } else {
+                wsRunningInfo.style.display = 'none';
+            }
+
             // Check human context warning banner
             checkHumanContext(p.id, p.status === 'human_required');
 
             // Default to overview tab
             switchTab('overview');
             loadControlData(p.id);
+            loadActivityTimeline(p.id);
 
             // Clear node details
             document.getElementById('node-details-empty').style.display = 'block';
@@ -813,7 +1080,22 @@
                 document.getElementById('ctrl-model-tier').innerText = data.current_model_tier || 'N/A';
                 document.getElementById('ctrl-blocking-issues').innerText = data.blocking_issues || '0';
                 document.getElementById('ctrl-enhanced-rounds').innerText = data.enhanced_rounds_used || '0';
-                document.getElementById('ctrl-rounds-since').innerText = data.rounds_since_progress || '0';
+                const roundsVal = parseInt(data.rounds_since_progress) || 0;
+                const cardRounds = document.getElementById('card-rounds-since');
+                const textRounds = document.getElementById('ctrl-rounds-since');
+                if (cardRounds && textRounds) {
+                    textRounds.innerText = roundsVal;
+                    if (roundsVal >= 5) {
+                        cardRounds.className = "bg-orange-950 p-4 rounded shadow-sm border border-orange-500/50";
+                        textRounds.className = "text-xl font-bold text-orange-500 animate-pulse";
+                    } else if (roundsVal >= 3) {
+                        cardRounds.className = "bg-yellow-900/60 p-4 rounded shadow-sm border border-yellow-600/40";
+                        textRounds.className = "text-xl font-bold text-yellow-400";
+                    } else {
+                        cardRounds.className = "bg-gray-700 p-4 rounded shadow-sm";
+                        textRounds.className = "text-xl font-bold text-yellow-400";
+                    }
+                }
                 document.getElementById('ctrl-plan-version').innerText = data.plan_version || '1';
                 document.getElementById('ctrl-last-mode').innerText = data.last_round_mode || 'N/A';
                 document.getElementById('ctrl-last-result').innerText = data.last_round_result || 'N/A';
@@ -823,11 +1105,30 @@
                 
                 if (data.phases && data.phases.length > 0) {
                     data.phases.forEach(ph => {
+                        let consecCell = '';
+                        if (ph.threshold !== null && ph.threshold !== undefined) {
+                            const val = parseInt(ph.consecutive_pass) || 0;
+                            const limit = parseInt(ph.threshold) || 1;
+                            const pct = Math.min(100, Math.round(val / limit * 100));
+                            const isCompleted = pct >= 100;
+                            const barColor = isCompleted ? 'bg-emerald-500' : 'bg-blue-500';
+                            consecCell = `
+                                <div class="flex items-center gap-2">
+                                    <span class="font-mono text-gray-200">${val}/${limit}</span>
+                                    <div class="w-24 bg-gray-700 h-2 rounded-full overflow-hidden" title="${pct}% complete">
+                                        <div class="${barColor} h-full transition-all duration-300" style="width: ${pct}%"></div>
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            consecCell = `<span class="text-gray-200 font-mono">${ph.consecutive_pass}</span>`;
+                        }
+
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
                             <td class="py-3 px-4 text-white font-semibold">Phase ${ph.id}</td>
-                            <td class="py-3 px-4 text-gray-200">${ph.consecutive_pass}</td>
-                            <td class="py-3 px-4 text-gray-200">${ph.total_validations}</td>
+                            <td class="py-3 px-4">${consecCell}</td>
+                            <td class="py-3 px-4 text-gray-200 font-mono">${ph.total_validations}</td>
                             <td class="py-3 px-4"><span class="px-2 py-0.5 rounded text-xs font-semibold ${ph.last_result === 'PASS' ? 'bg-emerald-600/30 text-emerald-400' : 'bg-red-600/30 text-red-400'}">${ph.last_result}</span></td>
                         `;
                         tableBody.appendChild(tr);
@@ -838,6 +1139,140 @@
             } catch (err) {
                 console.error("Error loading control data:", err);
             }
+        }
+
+        async function loadActivityTimeline(projId) {
+            try {
+                const res = await fetch(`/api/projects/${projId}/activity`);
+                if (!res.ok) return;
+                const events = await res.json();
+                
+                const container = document.getElementById('activity-timeline');
+                if (!container) return;
+                container.innerHTML = '';
+                
+                if (events.length === 0) {
+                    container.innerHTML = '<div class="text-gray-500 text-sm">No activity events found in loop.log.</div>';
+                    return;
+                }
+                
+                events.forEach(e => {
+                    let dotColorClass = 'bg-gray-500';
+                    if (e.type === 'complete') dotColorClass = 'bg-green-500';
+                    else if (e.type === 'review_revert') dotColorClass = 'bg-orange-500';
+                    else if (e.type === 'human_required') dotColorClass = 'bg-red-500';
+                    else if (e.type === 'model_upgrade') dotColorClass = 'bg-blue-500';
+                    else if (e.type === 'progress') dotColorClass = 'bg-teal-600';
+                    else if (e.type === 'leaf_converged') dotColorClass = 'bg-cyan-500';
+                    
+                    const item = document.createElement('div');
+                    item.className = 'relative pl-2';
+                    item.innerHTML = `
+                        <span class="absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full border border-gray-800 ${dotColorClass}"></span>
+                        <div class="text-sm">
+                            <span class="font-semibold text-gray-200">${e.text}</span>
+                            <span class="text-xs text-gray-500 ml-2 font-mono">${e.ts}</span>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            } catch (err) {
+                console.error("Error loading activity timeline:", err);
+            }
+        }
+
+        function renderColoredDiff(diffText) {
+            const container = document.getElementById('diff-window');
+            if (!container) return;
+            if (!diffText || diffText.trim() === "") {
+                container.innerHTML = `<span class="text-gray-500">No changes since last safe point</span>`;
+                return;
+            }
+            
+            const lines = diffText.split('\n');
+            const fragment = document.createDocumentFragment();
+            
+            lines.forEach(line => {
+                const div = document.createElement('div');
+                
+                if (line.startsWith('+') && !line.startsWith('+++')) {
+                    div.className = 'text-green-450 bg-green-950/20';
+                    div.textContent = line;
+                } else if (line.startsWith('-') && !line.startsWith('---')) {
+                    div.className = 'text-red-450 bg-red-950/20';
+                    div.textContent = line;
+                } else if (line.startsWith('@@')) {
+                    div.className = 'text-blue-300 font-semibold';
+                    div.textContent = line;
+                } else if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
+                    div.className = 'text-white font-bold border-b border-gray-800 pb-0.5 mt-2';
+                    div.textContent = line;
+                } else {
+                    div.className = 'text-gray-300';
+                    div.textContent = line;
+                }
+                fragment.appendChild(div);
+            });
+            
+            container.innerHTML = '';
+            container.appendChild(fragment);
+        }
+
+        async function loadDiffData() {
+            if (!currentProjectId) return;
+            const container = document.getElementById('diff-window');
+            if (!container) return;
+            container.innerHTML = '<span class="text-gray-500">Loading diff...</span>';
+            try {
+                const res = await fetch(`/api/projects/${currentProjectId}/diff`);
+                if (!res.ok) {
+                    container.innerHTML = `<span class="text-red-500">Failed to load diff</span>`;
+                    return;
+                }
+                const data = await res.json();
+                document.getElementById('diff-base').innerText = data.base || 'None';
+                document.getElementById('diff-head').innerText = data.head || 'None';
+                renderColoredDiff(data.diff);
+            } catch (err) {
+                console.error("Error loading diff:", err);
+                container.innerHTML = `<span class="text-red-500">Error: ${err.message}</span>`;
+            }
+        }
+
+        function viewNodeSpec() {
+            if (!selectedNodeId) return;
+            viewDoc(`tree/${selectedNodeId}.decomp.md`);
+        }
+
+        async function viewDoc(path) {
+            if (!currentProjectId) return;
+            const modal = document.getElementById('doc-modal');
+            const titleSpan = document.getElementById('doc-modal-title');
+            const contentDiv = document.getElementById('doc-modal-content');
+            if (!modal || !titleSpan || !contentDiv) return;
+            
+            titleSpan.innerText = path;
+            contentDiv.innerHTML = '<span class="text-gray-500">Loading document...</span>';
+            modal.style.display = 'flex';
+            
+            try {
+                const res = await fetch(`/api/projects/${currentProjectId}/doc?path=${encodeURIComponent(path)}`);
+                if (!res.ok) {
+                    const err = await res.json();
+                    contentDiv.innerHTML = `<span class="text-red-505 font-semibold">Error: ${err.detail || 'Failed to read document'}</span>`;
+                    return;
+                }
+                const data = await res.json();
+                contentDiv.textContent = data.content;
+            } catch (err) {
+                console.error("Error fetching document:", err);
+                contentDiv.innerHTML = `<span class="text-red-505 font-semibold">Error: ${err.message}</span>`;
+            }
+        }
+
+        function hideDocModal() {
+            const modal = document.getElementById('doc-modal');
+            if (modal) modal.style.display = 'none';
         }
 
         async function startProject() {
@@ -918,16 +1353,19 @@
         function switchTab(tab) {
             document.getElementById('content-overview').style.display = tab === 'overview' ? 'block' : 'none';
             document.getElementById('content-logs').style.display = tab === 'logs' ? 'block' : 'none';
+            document.getElementById('content-changes').style.display = tab === 'changes' ? 'block' : 'none';
             document.getElementById('content-config').style.display = tab === 'config' ? 'block' : 'none';
             document.getElementById('content-tree').style.display = tab === 'tree' ? 'block' : 'none';
             
             const tOverview = document.getElementById('tab-overview');
             const tLogs = document.getElementById('tab-logs');
+            const tChanges = document.getElementById('tab-changes');
             const tConfig = document.getElementById('tab-config');
             const tTree = document.getElementById('tab-tree');
             
             tOverview.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             tLogs.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
+            tChanges.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             tConfig.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             tTree.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             
@@ -935,6 +1373,9 @@
                 tOverview.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             } else if(tab === 'logs') {
                 tLogs.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
+            } else if(tab === 'changes') {
+                tChanges.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
+                loadDiffData();
             } else if(tab === 'config') {
                 tConfig.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             } else if(tab === 'tree') {
@@ -995,7 +1436,30 @@
                     const p = projects.find(x => x.id === currentProjectId);
                     if(p) {
                         document.getElementById('ws-phase').innerText = p.phase;
-                        document.getElementById('ws-stuck').innerText = p.stuck;
+                        
+                        const wsStuck = document.getElementById('ws-stuck');
+                        const cardWsStuck = document.getElementById('card-ws-stuck');
+                        const stuckVal = parseInt(p.stuck) || 0;
+                        if (cardWsStuck && wsStuck) {
+                            if (p.status === 'human_required' || p.status === 'FROZEN') {
+                                cardWsStuck.className = "bg-red-950 border border-red-500/50 p-3 rounded";
+                                wsStuck.className = "text-lg font-bold text-red-500 animate-pulse";
+                                wsStuck.innerText = `${stuckVal} ⚠️`;
+                            } else if (stuckVal >= 2) {
+                                cardWsStuck.className = "bg-orange-950 border border-orange-500/50 p-3 rounded";
+                                wsStuck.className = "text-lg font-bold text-orange-500 animate-pulse";
+                                wsStuck.innerText = `${stuckVal} ⚠️`;
+                            } else if (stuckVal === 1) {
+                                cardWsStuck.className = "bg-yellow-900/60 border border-yellow-600/40 p-3 rounded";
+                                wsStuck.className = "text-lg font-semibold text-yellow-400";
+                                wsStuck.innerText = `${stuckVal} ⚠️`;
+                            } else {
+                                cardWsStuck.className = "bg-gray-700 p-3 rounded";
+                                wsStuck.className = "text-lg font-semibold text-white";
+                                wsStuck.innerText = stuckVal;
+                            }
+                        }
+                        
                         document.getElementById('ws-status').innerText = p.status;
                         
                         const isRunning = p.is_running;
@@ -1039,6 +1503,30 @@
                             document.getElementById('ws-stale-badge').style.display = 'none';
                         }
 
+                        const wsRunningInfo = document.getElementById('ws-running-info');
+                        if (isRunning && p.started_at) {
+                            const startMs = Date.parse(p.started_at.replace(/-/g, '/'));
+                            const diffSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+                            const durStr = formatDuration(diffSec);
+                            let hbStr = '';
+                            if (p.heartbeat_age !== null && p.heartbeat_age !== undefined) {
+                                hbStr = ` · Heartbeat ${p.heartbeat_age}s ago`;
+                                if (p.heartbeat_age > 1800) {
+                                    wsRunningInfo.className = "text-xs text-red-500 font-bold animate-pulse";
+                                    wsRunningInfo.innerText = `⏱ running ${durStr}${hbStr} (⚠️ Possible Stall)`;
+                                } else {
+                                    wsRunningInfo.className = "text-xs text-gray-300 font-mono";
+                                    wsRunningInfo.innerText = `⏱ running ${durStr}${hbStr}`;
+                                }
+                            } else {
+                                wsRunningInfo.className = "text-xs text-gray-300 font-mono";
+                                wsRunningInfo.innerText = `⏱ running ${durStr}`;
+                            }
+                            wsRunningInfo.style.display = 'inline-block';
+                        } else {
+                            wsRunningInfo.style.display = 'none';
+                        }
+
                         // Check human context warning banner
                         checkHumanContext(p.id, p.status === 'human_required');
                     }
@@ -1049,6 +1537,7 @@
                 const isOverviewActive = document.getElementById('tab-overview').classList.contains('text-blue-400');
                 if (isOverviewActive) {
                     loadControlData(currentProjectId);
+                    loadActivityTimeline(currentProjectId);
                 }
 
                 const isTreeActive = document.getElementById('tab-tree').classList.contains('text-blue-400');
@@ -1060,6 +1549,7 @@
             }
         }, 5000);
 
+        initNotifications();
         fetchProjects();
     </script>
 </body>
