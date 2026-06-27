@@ -135,7 +135,6 @@ def _run_plan(cfg, mode_override):
 
 
 def _run_plan_locked(cfg, mode_override, lock_path=None):
-    import time
     repo_basename = os.path.basename(os.path.normpath(cfg["repo"]))
     ws_name = cfg["workspace"]
     start_epoch = int(time.time())
@@ -332,13 +331,12 @@ def _build_tree_gate_prompt(cfg, fw, node_id, decomp_path, requirements):
 
 
 def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
-    import time
+    """樹模式規劃迴圈：每 cycle 只拆一個 PENDING 節點。"""
     repo_basename = os.path.basename(os.path.normpath(cfg["repo"]))
     ws_name = cfg["workspace"]
     start_epoch = int(time.time())
     run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
 
-    """樹模式規劃迴圈：每 cycle 只拆一個 PENDING 節點。"""
     gen = cfg.get("generation") or {}
     threshold = gen.get("plan_converge_threshold", 2)
     max_rounds = gen.get("max_rounds", 30)

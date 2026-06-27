@@ -20,10 +20,18 @@ def parse_index_file(index_path: str) -> list[dict]:
         return workspaces
 
     try:
+        header_seen = False
         with open(index_path, "r", encoding="utf-8", errors="replace") as f:
             for line_idx, line in enumerate(f, 1):
                 line = line.strip()
-                if not line.startswith("|") or line.startswith("| 專案 ") or set(line) <= set("|-: "):
+                if not line.startswith("|"):
+                    continue
+                # Skip separator lines (e.g. |---|---|)
+                if set(line) <= set("|-: "):
+                    continue
+                # Skip the first header row (column titles)
+                if not header_seen:
+                    header_seen = True
                     continue
                 parts = [p.strip() for p in line.split("|")][1:-1]
                 if len(parts) >= 7:
@@ -61,7 +69,8 @@ def main():
     ap.add_argument("--k", type=int, default=2,
                     help="Min distinct repo count threshold for cross-project promotion")
     ap.add_argument("--since", default=None,
-                    help="Filter traces starting from YYYY-MM-DD")
+                    help="Filter rounds.jsonl traces starting from YYYY-MM-DD "
+                         "(note: does NOT affect oscillation_hotspots which reads cumulative fail_history)")
     ap.add_argument("--enhanced-threshold", type=int, default=4,
                     help="Min enhanced rounds used to mark enhanced ineffective")
     args = ap.parse_args()
@@ -148,8 +157,8 @@ def main():
             runs_grouped[run_id] = []
         runs_grouped[run_id].append(r)
 
-    total_repos_count = len({r["repo_path"] for r in all_rounds})
-    total_ws_count = len({f"{r['repo_path']}:{r['ws']}" for r in all_rounds})
+    total_repos_count = len({r.get("repo_path", "") for r in all_rounds} - {""})
+    total_ws_count = len({f"{r.get('repo_path', '')}:{r.get('ws', '')}" for r in all_rounds} - {":"})
     total_runs_count = len(runs_grouped)
     total_rounds_count = len(all_rounds)
 
@@ -157,7 +166,7 @@ def main():
     stuck_rounds = sum(1 for r in all_rounds if int(r.get("stuck_level") or 0) >= 1)
     escalation_rate_overall = (stuck_rounds / total_rounds_count) if total_rounds_count > 0 else 0.0
 
-    stuck_runs = {r["run_id"] for r in all_rounds if int(r.get("stuck_level") or 0) >= 1 and r.get("run_id")}
+    stuck_runs = {r.get("run_id") for r in all_rounds if int(r.get("stuck_level") or 0) >= 1 and r.get("run_id")}
 
     # Escalation rate by phase
     rounds_by_phase = {}
@@ -176,10 +185,9 @@ def main():
     killed_rounds = sum(1 for r in all_rounds if r.get("killed"))
     watchdog_kill_rate_overall = (killed_rounds / total_rounds_count) if total_rounds_count > 0 else 0.0
 
-    killed_runs = {r["run_id"] for r in all_rounds if r.get("killed") and r.get("run_id")}
+    killed_runs = {r.get("run_id") for r in all_rounds if r.get("killed") and r.get("run_id")}
 
     rounds_by_kill_reason = {}
-    killed_by_reason = {}
     for r in all_rounds:
         reason = r.get("killed")
         if reason:
@@ -345,7 +353,7 @@ def main():
     # 4. Generate summary.json structure
     summary_data = {
         "generated_at": datetime.now().strftime("%F %T"),
-        "snapshot": os.path.relpath(snapshot_path, HERE),
+        "snapshot": os.path.relpath(snapshot_path, os.path.join(HERE, "..")),
         "k": args.k,
         "totals": {
             "repos": total_repos_count,
@@ -395,6 +403,7 @@ def main():
     print(f"Total Rounds:     {total_rounds_count}")
     print(f"Candidates found: {len(cross_project_candidates)} (Meets K={args.k}: {sum(1 for c in cross_project_candidates if c['meets_K'])})")
     print(f"-------------------------\n")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

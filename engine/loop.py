@@ -459,17 +459,17 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
 
 
 def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
-    repo_basename = os.path.basename(os.path.normpath(cfg["repo"]))
-    ws_name = cfg["workspace"]
-    start_epoch = int(time.time())
-    run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
-
     """樹模式執行：葉子逐一跑、父等子解鎖、回流分兩種。
 
     排程：pick ready leaf → agent 跑葉子 → 收斂 → 解鎖父 → 整合驗證。
     回流 (a) 葉子內容錯 → NEEDS_REVISION（受 max_leaf_reflow 管）。
     回流 (b) 結構錯（缺葉子/需再拆）→ 停、交人（授權紅線）。
     """
+    repo_basename = os.path.basename(os.path.normpath(cfg["repo"]))
+    ws_name = cfg["workspace"]
+    start_epoch = int(time.time())
+    run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
+
     rt = cfg["runtime"]
     control = cfg["control"]
     osc = cfg["oscillation"]

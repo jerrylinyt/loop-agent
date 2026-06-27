@@ -426,6 +426,167 @@ def test_collect_traces_metrics():
         fp2_cand = next(c for c in candidates if c["signal_key"] == "oscillation:fp2")
         assert fp2_cand["meets_K"] is False
 
+        # Verify escalation_rate (1 of 2 rounds has stuck_level >= 1)
+        assert summary["metrics"]["escalation_rate"]["overall"] == 0.5
+
+        # Verify watchdog_kill_rate (0 killed rounds)
+        assert summary["metrics"]["watchdog_kill_rate"]["overall"] == 0.0
 
 
+def test_collect_traces_spec_conflict_suspect():
+    """Verify SPEC_CONFLICT_SUSPECT prelabel for enhanced_ineffective candidates."""
+    import sys
+    import subprocess
+    import json
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_a = os.path.join(tmpdir, "repo-a")
+        repo_b = os.path.join(tmpdir, "repo-b")
 
+        for r in (repo_a, repo_b):
+            os.makedirs(os.path.join(r, ".loop", "default", ".loop_state"), exist_ok=True)
+
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("| Project | repo | workspace | phase | stuck | status | updated |\n")
+            f.write(f"| repo-a | {repo_a} | default | 1 | 0 | tracked | t |\n")
+            f.write(f"| repo-b | {repo_b} | default | 1 | 0 | tracked | t |\n")
+
+        # repo-a: enhanced_rounds_used=5 (>= threshold 4), last round progressed=False
+        with open(os.path.join(repo_a, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
+            f.write(json.dumps({"run_id": "a:default:1", "round": 1, "loop_type": "execute",
+                                "phase": "2", "result": "FAIL", "consecutive_pass": 0,
+                                "progressed": False, "stuck_level": 0,
+                                "enhanced_rounds_used": 5, "ts": "2026-06-27 22:00:00"}) + "\n")
+
+        # repo-b: same phase, enhanced_rounds_used=6, progressed=False
+        with open(os.path.join(repo_b, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
+            f.write(json.dumps({"run_id": "b:default:1", "round": 1, "loop_type": "execute",
+                                "phase": "2", "result": "FAIL", "consecutive_pass": 0,
+                                "progressed": False, "stuck_level": 0,
+                                "enhanced_rounds_used": 6, "ts": "2026-06-27 22:00:00"}) + "\n")
+
+        collect_py = os.path.join(os.path.dirname(os.path.dirname(__file__)), "engine", "collect_traces.py")
+        out_dir = os.path.join(tmpdir, "out")
+        result = subprocess.run([
+            sys.executable, collect_py,
+            "--index", index_path, "--out", out_dir, "--k", "2"
+        ], capture_output=True, text=True)
+
+        assert result.returncode == 0
+
+        with open(os.path.join(out_dir, "summary.json"), "r") as sf:
+            summary = json.load(sf)
+
+        # Should have an enhanced_ineffective candidate with SPEC_CONFLICT_SUSPECT prelabel
+        ei_candidates = [c for c in summary["cross_project_candidates"]
+                         if c["kind"] == "enhanced_ineffective"]
+        assert len(ei_candidates) >= 1
+        ei_cand = ei_candidates[0]
+        assert ei_cand["prelabel"] == "SPEC_CONFLICT_SUSPECT"
+        assert ei_cand["meets_K"] is True
+        assert ei_cand["distinct_repos"] == 2
+
+
+def test_collect_traces_malformed_json_skip():
+    """Verify malformed JSON lines are skipped with warning, exit code remains 0."""
+    import sys
+    import subprocess
+    import json
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_a = os.path.join(tmpdir, "repo-a")
+
+        os.makedirs(os.path.join(repo_a, ".loop", "default", ".loop_state"), exist_ok=True)
+
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("| Project | repo | workspace | phase | stuck | status | updated |\n")
+            f.write(f"| repo-a | {repo_a} | default | 1 | 0 | tracked | t |\n")
+
+        # Write one valid line and one malformed line
+        with open(os.path.join(repo_a, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
+            f.write(json.dumps({"run_id": "a:default:1", "round": 1, "loop_type": "execute",
+                                "phase": "1", "result": "PASS", "consecutive_pass": 1,
+                                "progressed": True, "stuck_level": 0,
+                                "enhanced_rounds_used": 0, "ts": "2026-06-27 22:00:00"}) + "\n")
+            f.write("THIS IS NOT VALID JSON\n")
+            f.write(json.dumps({"run_id": "a:default:1", "round": 2, "loop_type": "execute",
+                                "phase": "1", "result": "PASS", "consecutive_pass": 2,
+                                "progressed": True, "stuck_level": 0,
+                                "enhanced_rounds_used": 0, "ts": "2026-06-27 22:01:00"}) + "\n")
+
+        collect_py = os.path.join(os.path.dirname(os.path.dirname(__file__)), "engine", "collect_traces.py")
+        out_dir = os.path.join(tmpdir, "out")
+        result = subprocess.run([
+            sys.executable, collect_py,
+            "--index", index_path, "--out", out_dir, "--k", "2"
+        ], capture_output=True, text=True)
+
+        # Exit code must still be 0 despite malformed line
+        assert result.returncode == 0
+        # Warning should appear in stderr
+        assert "Malformed JSON" in result.stderr
+
+        with open(os.path.join(out_dir, "summary.json"), "r") as sf:
+            summary = json.load(sf)
+
+        # Only 2 valid rounds should be counted (malformed line skipped)
+        assert summary["totals"]["rounds"] == 2
+
+
+def test_collect_traces_pass_reset_and_streaks():
+    """Verify non_converging_streaks and pass_reset_rate calculations."""
+    import sys
+    import subprocess
+    import json
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_a = os.path.join(tmpdir, "repo-a")
+
+        os.makedirs(os.path.join(repo_a, ".loop", "default", ".loop_state"), exist_ok=True)
+
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("| Project | repo | workspace | phase | stuck | status | updated |\n")
+            f.write(f"| repo-a | {repo_a} | default | 1 | 0 | tracked | t |\n")
+
+        # Construct rounds that exercise:
+        # - non_converging_streaks: 3 consecutive non-progressed rounds
+        # - pass_reset_rate: consecutive_pass goes 0→1→2→0 (one reset event)
+        rounds_data = [
+            {"run_id": "a:default:1", "round": 1, "loop_type": "execute", "phase": "1",
+             "result": "PASS", "consecutive_pass": 1, "progressed": True,
+             "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:00:00"},
+            {"run_id": "a:default:1", "round": 2, "loop_type": "execute", "phase": "1",
+             "result": "PASS", "consecutive_pass": 2, "progressed": True,
+             "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:01:00"},
+            {"run_id": "a:default:1", "round": 3, "loop_type": "execute", "phase": "1",
+             "result": "FAIL", "consecutive_pass": 0, "progressed": False,
+             "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:02:00"},
+            {"run_id": "a:default:1", "round": 4, "loop_type": "execute", "phase": "1",
+             "result": "FAIL", "consecutive_pass": 0, "progressed": False,
+             "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:03:00"},
+            {"run_id": "a:default:1", "round": 5, "loop_type": "execute", "phase": "1",
+             "result": "FAIL", "consecutive_pass": 0, "progressed": False,
+             "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:04:00"},
+        ]
+
+        with open(os.path.join(repo_a, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
+            for rd in rounds_data:
+                f.write(json.dumps(rd) + "\n")
+
+        collect_py = os.path.join(os.path.dirname(os.path.dirname(__file__)), "engine", "collect_traces.py")
+        out_dir = os.path.join(tmpdir, "out")
+        result = subprocess.run([
+            sys.executable, collect_py,
+            "--index", index_path, "--out", out_dir, "--k", "2"
+        ], capture_output=True, text=True)
+
+        assert result.returncode == 0
+
+        with open(os.path.join(out_dir, "summary.json"), "r") as sf:
+            summary = json.load(sf)
+
+        # Non-converging streaks: 3 consecutive non-progressed (rounds 3,4,5)
+        assert summary["metrics"]["non_converging_streaks"]["max"] == 3
+
+        # Pass reset rate: 1 reset (pass went 2→0 at round 3) out of 5 total rounds
+        assert summary["metrics"]["pass_reset_rate"]["overall"] == round(1 / 5, 4)

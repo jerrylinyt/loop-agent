@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import logging
 from collections import deque
 from git_utils import git_head
@@ -131,7 +132,6 @@ def append_round_record(cfg: dict, record: dict) -> None:
     p = rounds_log_path(cfg)
     try:
         os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-        import json
         line = json.dumps(record, ensure_ascii=False)
         with open(p, "a", encoding="utf-8") as f:
             f.write(line + "\n")
