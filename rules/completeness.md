@@ -41,6 +41,10 @@
 ```
 每一輪（獨立列舉,先不看舊 inventory）:
   1. 從來源重新做一次機械式列舉,得到本輪「項目集合」。
+     🚨 防橡皮圖章(留痕標準對齊 convergence.md step 1/5):本步驟【必須】先「不看舊 inventory」,
+        把本輪獨立列舉結果(每項含 檔:行)寫成 scratch 留痕檔(如 <outputs>/.enum/<task>-R###.md),
+        再進第 2 步比對。❌ 嚴禁先打開舊 inventory 看一眼就宣稱「本輪無新項」→ converge+1;
+        無留痕檔的那一輪集合比對無效,不得 converge+1。
   2. 與既有 inventory 做集合比較（比「項目身分」,非逐字):
        · 有「新項目」(本輪列到、舊的沒有) → 漏看!補進 inventory + 補分析 + converge=0（歸零）。
        · 有「該移除項目」(舊的誤列/不存在) → 修正 + converge=0。

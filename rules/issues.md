@@ -10,6 +10,11 @@
 
 > ⚠️ **千萬別把停止條件設成「Open Issue = 0」**——外部依賴的 Issue 永遠關不掉,會死結。
 > 停止條件用「**無 BLOCKING Issue**」(即 `blocking_issues == 0`)。
+>
+> 🚨 強制約束(分級從嚴,對齊 convergence.md 的「實質/表面」從嚴預設):有疑義一律先列 `BLOCKING`;
+>    只有「明確外部依賴 / 已知且可接受的風險」才可列 `NON_BLOCKING`,且須在 Issue 內寫明理由。
+>    ❌ 嚴禁:為了讓停止條件成立(`blocking_issues==0`)、或為了避免 `consecutive_pass` 歸零,
+>    把一個「不解決就無法正確完成」的問題降級成 NON_BLOCKING。分不清屬於哪級 → 從嚴算 BLOCKING。
 
 ## 2. 何時開 Issue（不准腦補）
 遇到不確定一律建 Issue,不准腦補:未知格式、不明錯誤碼、無法解析的動態邏輯、缺檔、
