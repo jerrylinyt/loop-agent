@@ -50,47 +50,61 @@ def expand_control_files(cfg: dict) -> list[str]:
     return files
 
 
-def control_file_looks_broken(path: str, min_bytes: int) -> bool:
+def control_file_looks_broken(path: str) -> bool:
     if not os.path.exists(path):
         return False
     try:
-        if os.path.getsize(path) < min_bytes:
-            return True
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 if line.strip():
                     return not line.lstrip().startswith("#")
-        return True
+        return True # 全空或全是註解
     except OSError as e:
         logger.warning(f"Error checking if control file is broken {path}: {e}")
         return True
 
 
-def inspect_and_fix_blank(cfg: dict, log_both):
-    """程式兜底：只還原『整檔被清空』的主控檔。內容級審查交給 agent BOOT STEP G0。"""
+def inspect_and_fix_blank(cfg: dict, log_both) -> bool:
+    """檢查核心狀態檔案是否完整。若破損（全空或被刪除），嘗試往回找 5 個 commit 還原。
+    若皆失敗，回傳 False 讓引擎停機。"""
     if not in_git_repo():
-        return
-    min_bytes = cfg["runtime"]["control_min_bytes"]
+        return True
+    max_lookback = 5
+    
     for cf in expand_control_files(cfg):
-        if os.path.exists(cf) and control_file_looks_broken(cf, min_bytes):
-            try:
-                subprocess.run(["git", "checkout", "HEAD", "--", cf],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if control_file_looks_broken(cf, min_bytes):
-                    subprocess.run(["git", "checkout", "HEAD~1", "--", cf],
+        is_tracked = subprocess.run(["git", "ls-files", "--error-unmatch", cf], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        is_missing = is_tracked and not os.path.exists(cf)
+        is_broken = os.path.exists(cf) and control_file_looks_broken(cf)
+        
+        if is_missing or is_broken:
+            reason = "被無故刪除" if is_missing else "被清空或只剩註解"
+            log_both(f"  ⚠️ 偵測到核心狀態檔 {cf} {reason}，嘗試從歷史紀錄復原...")
+            recovered = False
+            for i in range(max_lookback + 1):
+                ref = "HEAD" if i == 0 else f"HEAD~{i}"
+                try:
+                    subprocess.run(["git", "checkout", ref, "--", cf],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                log_both(f"  🩹 {cf} 整檔空白 → 已還原（程式兜底；內容級審查由 agent G0 負責）。")
-            except OSError as e:
-                logger.error(f"Failed to checkout broken control file {cf}: {e}")
+                    if os.path.exists(cf) and not control_file_looks_broken(cf):
+                        log_both(f"  🩹 {cf} 成功從 {ref} 復原！")
+                        recovered = True
+                        break
+                except OSError:
+                    pass
+                    
+            if not recovered:
+                log_both(f"  🚨 致命錯誤：狀態檔 {cf} 無法從最近 {max_lookback} 個 Commit 中復原！")
+                return False
+                
+    return True
 
 
 def git_guard(cfg: dict, round_no: int, log_both):
     if not in_git_repo():
         return
-    min_bytes = cfg["runtime"]["control_min_bytes"]
     try:
         for cf in expand_control_files(cfg):
-            if os.path.exists(cf) and control_file_looks_broken(cf, min_bytes):
+            if os.path.exists(cf) and control_file_looks_broken(cf):
                 log_both(f"[guard] {cf} 疑似被清空 → 提交前先從 HEAD 還原")
                 subprocess.run(["git", "checkout", "HEAD", "--", cf])
         if subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True).stdout.strip():

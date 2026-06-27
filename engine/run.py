@@ -23,6 +23,10 @@ sys.path.insert(0, HERE)
 
 from utils import add_common_args, apply_quiet_flag, resolve_workspace
 from config import load_config
+from tree import (
+    tree_enabled, tree_md_path, reset_subtree_for_replan,
+    format_tree_for_human, get_node,
+)
 
 
 def run_plan(mode: str) -> int:
@@ -33,11 +37,43 @@ def run_exec() -> int:
     return subprocess.call([sys.executable, os.path.join(HERE, "loop.py")])
 
 
+def run_reject(cfg, subtree_id: str | None) -> int:
+    """人類 gate fail-path：局部重拆。
+
+    把指定子樹的所有子孫移除、節點改回 PENDING → 重跑 tree plan loop
+    只對該子樹重新拆解收斂 → 重過 gate。
+    """
+    if not subtree_id:
+        print("❌ --stage reject 需要 --subtree <node_id>", flush=True)
+        return 1
+
+    if not tree_enabled(cfg):
+        print("❌ 此專案未啟用拆解樹，無法使用 reject。", flush=True)
+        return 1
+
+    tree_path = tree_md_path(cfg)
+    node = get_node(tree_path, subtree_id)
+    if node is None:
+        print(f"❌ 節點 '{subtree_id}' 不存在。", flush=True)
+        return 1
+
+    print(f"\n🔄 局部重拆：重設節點 [{subtree_id}] 及其子孫 → PENDING", flush=True)
+    ok = reset_subtree_for_replan(tree_path, subtree_id)
+    if not ok:
+        print("❌ 重設失敗。", flush=True)
+        return 1
+
+    print(f"   [{subtree_id}] 已重設。重新進入樹規劃迴圈...\n", flush=True)
+    return run_plan("gated")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Loop Engineering 入口（生成 + 執行）")
     ap.add_argument("--mode", choices=["gated", "auto"], default=None,
                     help="預設取自 config.generation.mode")
-    ap.add_argument("--stage", choices=["all", "plan", "execute"], default="all")
+    ap.add_argument("--stage", choices=["all", "plan", "execute", "reject"], default="all")
+    ap.add_argument("--subtree", default=None,
+                    help="搭配 --stage reject：指定要局部重拆的節點 ID")
     add_common_args(ap)
     args = ap.parse_args()
 
@@ -55,6 +91,8 @@ def main():
         return run_plan("gated")        # 只生成:不論 mode 都不接執行
     if args.stage == "execute":
         return run_exec()
+    if args.stage == "reject":
+        return run_reject(cfg, args.subtree)
 
     # stage=all
     if args.mode == "auto":
