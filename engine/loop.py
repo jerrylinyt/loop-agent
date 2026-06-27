@@ -503,6 +503,18 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             return 2
         if lock_path:
             touch_run_lock(lock_path)
+        sync_framework_docs(cfg, log_both)
+
+        # ── 獨立 Git Review Gate：審查上一輪 commit，破壞性改動自動 revert（與平模式一致，稽核 #2）──
+        passed, human_conflict = run_git_review_gate(cfg, log_both)
+        if human_conflict:
+            set_val(control, "human_required", "true")
+            log_both("🧑‍⚖️ 偵測到 human_required：Git Review Gate 判定需人類介入，loop 停止。")
+            return 2
+        if not passed:
+            log_both("  [Git Review Gate] 已還原/退回，跳過本輪執行以重試。")
+            current_leaf = None    # 被 revert 後重新挑葉子,避免指向已回退狀態
+            continue
 
         # ── 選下一個可執行葉子 ──
         if current_leaf is None:
