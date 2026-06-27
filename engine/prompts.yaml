@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────
+# Agent prompts（框架預設層 / cascade 最底層）
+#
+# 設計原則：prompt 只負責「本輪做什麼 + 讀哪份 rule + 產出/commit 機械步驟」。
+# 所有方法論（怎麼收斂、何時歸零、何時停機、如何防漏）一律【不在 prompt 重寫】，
+# 改為指向 .loop/rules/ 對應規則——rules 是唯一事實來源，改 rule 不必同步改 prompt。
+#
+# 佔位符（{control} {requirements} {plan_md} {diff_content} {control_contents}
+# {result_file} {node_id} {decomp_file} {max_files} {max_lines} …）由 config.fmt_prompt()
+# 以 str.replace 代入；未代入的 {xxx} 會原樣留下，故只用引擎實際會帶入的 key。
+#
+# 專案可在 loop.config.yaml 用 agent.prompts.<key> 覆蓋單一 prompt（deep_merge）。
+# ─────────────────────────────────────────────────────────────────────────
+
+base: |
+  請讀取 {control}，依 .loop/rules/boot-sequence.md 的 BOOT SEQUENCE 開始工作（結束時做 STEP C 的提交）。
+  🚨 嚴格遵守 boot-sequence 兩條鐵則：本輪只挑【單一一個】任務；STEP 10 完成 commit 後【立即停止輸出並結束 process】，絕不自行開下一輪。
+  本輪必讀：{control} 與 .loop/rules/boot-sequence.md；其餘 rules 按需讀（收斂讀 convergence.md、大範圍讀 completeness.md…）。
+  每輪務必回填 last_round_mode / last_round_result / last_round_fail_tasks。
+
+escalation: |
+  前幾輪偵測到反覆修壞（A↔B 震盪 / 卡在驗證）。請先判斷根因再動手：
+  (1) 實作疏漏（A、B 可同時滿足）→ 一次修對兩邊；
+  (2) 規格矛盾（兩條規格本質衝突）→ 不要硬修，依 .loop/rules/oscillation-escalation.md 開 BLOCKING Issue 寫清楚衝突與出處，
+      把涉及任務標 FROZEN，交人類裁決。判斷依據寫進 Issue/修正記錄。
+
+git_review: |
+  你正在執行 Loop Engineering 的【獨立 Git Review Gate】（全新 context，只審不寫 code）。
+  目標：審查上一次的 Commit Diff 是否合理，並驗證核心狀態檔是否遭到破壞，防止 Agent 幻覺搞砸大腦。
+  讀取：.loop/rules/git-review-gate.md 的檢查規則。
+  輸入 Diff 如下：
+  {diff_content}
+
+  目前狀態檔的完整內容如下：
+  {control_contents}
+
+  請依據規則嚴格審查，並將最終判決寫入 `{result_file}` 檔案中
+  （請直接覆寫該檔，內容只要一行 `[REVIEW: PASS]` 或 `[REVIEW: REVERT] <具體原因>` 或 `[REVIEW: FATAL_STATE] <具體原因>`）。
+  🚨 寫完判決即停止輸出、不做任何額外動作（不執行 git commit、不修改任何其他檔案）。
+
+plan: |
+  你正在執行 Loop Engineering【階段②：生成/精修規劃書】（生成輪）。
+  讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、context-budget、state-model、convergence、completeness）。
+  依 .loop/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 {control} 等規劃書（loop.config.yaml + CONTROL.md + phases/*.md）。
+  🚨 收斂一律依 .loop/rules/convergence.md 協定執行（先不看舊版、從需求獨立重推 → 留痕 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零 → 有疑義從嚴算實質）。不要在此自訂收斂判準。
+  把 {plan_md} 的 plan_changed_last 設 true（本輪有實質改動）/ false（無）。
+  寫檔只允許 .loop/，禁止寫框架。結束 git add -A && git commit。
+  （Plan Gate 由獨立的審查輪負責，你這輪不需自審。）
+
+plan_gate: |
+  你正在執行 Loop Engineering【階段②的獨立 Plan Gate】（全新 context，只審不生）。
+  讀 {requirements} + .loop/ 的 loop.config.yaml / CONTROL.md / phases/*.md + .loop/generators/2-plan-review-gate.md。
+  逐項檢查 Gate（需求全覆蓋 / 任務粒度 / 無循環依賴 / 停止可判讀 / 收斂就位 / 逃生門 / context 防爆 / 框架唯讀 / 引擎可讀 / 輪數估算）。
+  ❗只審查、不要修改任何規劃書檔（read-only verify）。
+  把結果寫進 {plan_md}：plan_gate_last= PASS（全過）或 FAIL（未過項記到 plan.log）。
+  結束 git add -A && git commit（理論上只有 {plan_md} 會變）。
+
+tree_decompose: |
+  你正在執行 Loop Engineering【規劃期：漸進拆解】。本輪只拆解一個節點。
+  目標節點：{node_id}（工單見 {decomp_file}）。
+  讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、convergence、completeness、context-budget）。
+  獨立重推：將此節點拆成子項，寫進 {decomp_file}。
+    - proposed_children: 逗號分隔的子項 ID（簡短 slug）
+    - 每個子項加 child_<id>_type = leaf（可獨立驗證的最小工作單位）或 pending（需進一步拆）
+    - 每個子項加 child_<id>_summary = 一句話描述
+  🚨 收斂一律依 .loop/rules/convergence.md 的集合穩定協定（先不看舊版、獨立重列舉 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零）。不要在此自訂收斂判準。
+  把 decomp_changed_last 設 true（有改動）/ false（無）。
+  寫檔只允許 {decomp_file}。結束 git add -A && git commit。
+
+tree_decompose_gate: |
+  你正在執行 Loop Engineering【規劃期：拆解審查】（全新 context，只審不生）。
+  審查 {decomp_file} 中 {node_id} 的拆解結果。
+  讀 {requirements} + .loop/rules/convergence.md + completeness.md。
+  檢查：子項是否互不重疊、是否涵蓋父節點所有面向、
+    leaf 子項是否真的可獨立驗證且符合最小工作單位（≤ {max_files} 檔、≤ {max_lines} 行、單一關注點）。
+  ❗只審查、不修改拆解結果。
+  把結果寫進 {decomp_file}：decomp_gate_last = PASS 或 FAIL。
+  結束 git add -A && git commit。

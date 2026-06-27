@@ -153,6 +153,16 @@ def preflight(cfg: dict, stage: str) -> tuple[list[str], list[str]]:
     for k in ("fast", "normal", "thinking"):
         if _is_placeholder(models.get(k)):
             errors.append(f"agent.models.{k} 仍是佔位值，請在專案 config (loop.config.yaml) 填入實際模型。")
+
+    # prompts 由框架 engine/prompts.yaml 提供（cascade 最底層）；缺檔或空白 → agent 收到空指令會空轉
+    prompts = agent.get("prompts", {}) or {}
+    missing_prompts = [k for k in ("base", "escalation", "git_review", "plan", "plan_gate",
+                                   "tree_decompose", "tree_decompose_gate")
+                       if not str(prompts.get(k) or "").strip()]
+    if missing_prompts:
+        errors.append(f"agent.prompts 缺少或空白：{', '.join(missing_prompts)}"
+                      f"（應由框架 engine/prompts.yaml 提供，請確認該檔存在且完整）。")
+
     import shlex
     bc = agent.get("build_cmd") or ""
     exe = shlex.split(bc)[0] if bc.strip() else ""

@@ -4,6 +4,23 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+
+def _load_default_prompts() -> dict:
+    """從框架側 engine/prompts.yaml 載入 agent prompts（cascade 最底層）。
+    prompt 只負責「本輪做什麼 + 讀哪份 rule + 產出/commit」；收斂/停止等方法論一律由 rules 承接（單一事實來源）。
+    缺檔回傳 {}，由 preflight 擋下並給清楚訊息（見 utils.preflight）。"""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts.yaml")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        logger.error(f"prompts.yaml 不存在：{path}")
+        return {}
+    except Exception as e:
+        logger.error(f"載入 prompts.yaml 失敗：{e}")
+        return {}
+
+
 # ─────────────── 框架預設（cascade 最底層） ───────────────
 DEFAULTS = {
     "framework_path": os.path.expanduser("~/.loop/framework"),
@@ -71,81 +88,10 @@ DEFAULTS = {
             "integrate": "normal",
             "execute": "fast",
         },
-        # 提示樣板（佔位：{control} {plan_md} {requirements}）。省略則用以下預設。
-        "prompts": {
-            "base": (
-                "請讀取 {control}，依 .loop/rules/boot-sequence.md 的 BOOT SEQUENCE 開始工作"
-                "（結束時做 STEP C 的提交）。"
-                "本輪必讀：{control} 與 .loop/rules/boot-sequence.md；其餘 rules 按需讀。"
-                "每輪務必回填 last_round_mode / last_round_result / last_round_fail_tasks。"
-            ),
-            "escalation": (
-                "前幾輪偵測到反覆修壞（A↔B 震盪 / 卡在驗證）。請先判斷根因再動手："
-                "(1) 實作疏漏（A、B 可同時滿足）→ 一次修對兩邊；"
-                "(2) 規格矛盾（兩條規格本質衝突）→ 不要硬修，開 BLOCKING Issue 寫清楚衝突與出處，"
-                "把涉及任務標 FROZEN，交人類裁決。判斷依據寫進 Issue/修正記錄。"
-            ),
-            "git_review": (
-                "你正在執行 Loop Engineering 的【獨立 Git Review Gate】（全新 context，只審不寫 code）。\n"
-                "目標：審查上一次的 Commit Diff 是否合理，並驗證核心狀態檔是否遭到破壞，防止 Agent 幻覺搞砸大腦。\n"
-                "讀取：.loop/rules/git-review-gate.md 的檢查規則。\n"
-                "輸入 Diff 如下：\n"
-                "{diff_content}\n\n"
-                "目前狀態檔的完整內容如下：\n"
-                "{control_contents}\n\n"
-                "請依據規則嚴格審查，並將最終判決寫入 `{result_file}` 檔案中\n"
-                "（請直接覆寫該檔，內容只要一行 `[REVIEW: PASS]` 或 `[REVIEW: REVERT] <具體原因>` 或 `[REVIEW: FATAL_STATE] <具體原因>`）。\n"
-                "寫檔完成後直接結束，不需執行 git commit。"
-            ),
-            "plan": (
-                "你正在執行 Loop Engineering【階段②：生成/精修規劃書】（生成輪）。\n"
-                "讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、context-budget、"
-                "state-model、convergence、completeness）。\n"
-                "依 .loop/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 "
-                "{control} 等規劃書（loop.config.yaml + CONTROL.md + phases/*.md）。\n"
-                "收斂迴圈：若已存在規劃書，請『先不看舊版、從需求獨立重推一份』再與現有比對；\n"
-                "  僅在有『實質差異』時才修改檔案；無實質差異就不要動檔。\n"
-                "把 {plan_md} 的 plan_changed_last 設 true（本輪有實質改動）/ false（無）。\n"
-                "寫檔只允許 .loop/，禁止寫框架。結束 git add -A && git commit。\n"
-                "（Plan Gate 由獨立的審查輪負責，你這輪不需自審。）"
-            ),
-            "plan_gate": (
-                "你正在執行 Loop Engineering【階段②的獨立 Plan Gate】（全新 context，只審不生）。\n"
-                "讀 {requirements} + .loop/ 的 loop.config.yaml / CONTROL.md / phases/*.md "
-                "+ .loop/generators/2-plan-review-gate.md。\n"
-                "逐項檢查 Gate（需求全覆蓋 / 任務粒度 / 無循環依賴 / 停止可判讀 / 收斂就位 / "
-                "逃生門 / context 防爆 / 框架唯讀 / 引擎可讀 / 輪數估算）。\n"
-                "❗只審查、不要修改任何規劃書檔（read-only verify）。\n"
-                "把結果寫進 {plan_md}：plan_gate_last= PASS（全過）或 FAIL（未過項記到 plan.log）。\n"
-                "結束 git add -A && git commit（理論上只有 {plan_md} 會變）。"
-            ),
-            # ── 漸進拆解（樹模式） ──
-            "tree_decompose": (
-                "你正在執行 Loop Engineering【規劃期：漸進拆解】。本輪只拆解一個節點。\n"
-                "目標節點：{node_id}（工單見 {decomp_file}）。\n"
-                "讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、convergence、"
-                "completeness、context-budget）。\n"
-                "獨立重推：將此節點拆成子項，寫進 {decomp_file}。\n"
-                "  - proposed_children: 逗號分隔的子項 ID（簡短 slug）\n"
-                "  - 每個子項加 child_{{id}}_type = leaf（可獨立驗證的最小工作單位）或 pending（需進一步拆）\n"
-                "  - 每個子項加 child_{{id}}_summary = 一句話描述\n"
-                "收斂迴圈：若已有提議，先不看舊版、從需求獨立重推一份再比對；\n"
-                "  僅在有實質差異時才修改；無差異就不動檔。\n"
-                "把 decomp_changed_last 設 true（有改動）/ false（無）。\n"
-                "寫檔只允許 {decomp_file}。結束 git add -A && git commit。"
-            ),
-            "tree_decompose_gate": (
-                "你正在執行 Loop Engineering【規劃期：拆解審查】（全新 context，只審不生）。\n"
-                "審查 {decomp_file} 中 {node_id} 的拆解結果。\n"
-                "讀 {requirements} + .loop/rules/convergence.md + completeness.md。\n"
-                "檢查：子項是否互不重疊、是否涵蓋父節點所有面向、\n"
-                "  leaf 子項是否真的可獨立驗證且符合最小工作單位（≤ {max_files} 檔、≤ {max_lines} 行、"
-                "單一關注點）。\n"
-                "❗只審查、不修改拆解結果。\n"
-                "把結果寫進 {decomp_file}：decomp_gate_last = PASS 或 FAIL。\n"
-                "結束 git add -A && git commit。"
-            ),
-        },
+        # 提示樣板：外部化到 engine/prompts.yaml（框架預設層）。
+        # prompt 只負責「本輪做什麼 + 讀哪份 rule + 產出/commit」，方法論交給 rules（單一事實來源）。
+        # 專案可用 loop.config.yaml 的 agent.prompts.<key> 覆蓋單一 prompt。
+        "prompts": _load_default_prompts(),
     },
 }
 
