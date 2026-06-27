@@ -16,7 +16,7 @@ from datetime import datetime
 
 from config import load_config, fmt_prompt, select_model, model_tier_label
 from git_utils import in_git_repo, changed_files, git_guard
-from state import get_val, set_val, as_int
+from state import get_val, set_val, as_int, append_round_record
 from agent_runner import build_cmd, run_agent
 from tree import (
     tree_enabled, tree_md_path, seed_tree,
@@ -135,6 +135,12 @@ def _run_plan(cfg, mode_override):
 
 
 def _run_plan_locked(cfg, mode_override, lock_path=None):
+    import time
+    repo_basename = os.path.basename(os.path.normpath(cfg["repo"]))
+    ws_name = cfg["workspace"]
+    start_epoch = int(time.time())
+    run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
+
     gen = cfg.get("generation") or {}
     threshold = gen.get("plan_converge_threshold", 2)
     max_rounds = gen.get("max_rounds", 30)
@@ -190,6 +196,24 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
         cmd = build_cmd(cfg, gen_model, build_gen_prompt(cfg, fw, plan_md, req))
         rc, killed = run_agent(cmd, cfg)
         if killed:
+            append_round_record(cfg, {
+                "run_id": run_id,
+                "ts": datetime.now().strftime("%F %T"),
+                "round": i,
+                "loop_type": "plan",
+                "phase": "plan",
+                "leaf": None,
+                "result": "NA",
+                "mode": "plan",
+                "killed": killed,
+                "stuck_level": plan_stuck,
+                "rounds_since_progress": rounds_since + 1,
+                "enhanced_rounds_used": as_int(get_val(plan_md, "plan_enhanced_rounds_used")),
+                "no_activity": 1,
+                "consecutive_pass": 0,
+                "progressed": False,
+                "model_tier": tier,
+            })
             hb(f"  Round A 被 watchdog 中斷（{killed}），清理後重跑下一個 cycle。")
             git_guard(cfg, i, log_both)
             time.sleep(interval)
@@ -249,6 +273,25 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
         set_val(plan_md, "plan_stable_rounds", str(stable_rounds))
         set_val(plan_md, "plan_rounds_since_progress", str(rounds_since))
 
+        append_round_record(cfg, {
+            "run_id": run_id,
+            "ts": datetime.now().strftime("%F %T"),
+            "round": i,
+            "loop_type": "plan",
+            "phase": "plan",
+            "leaf": None,
+            "result": gate or "NA",
+            "mode": "plan",
+            "killed": killed,
+            "stuck_level": plan_stuck,
+            "rounds_since_progress": rounds_since,
+            "enhanced_rounds_used": as_int(get_val(plan_md, "plan_enhanced_rounds_used")),
+            "no_activity": 0,
+            "consecutive_pass": stable_rounds,
+            "progressed": stable,
+            "model_tier": tier,
+        })
+
         if stable_rounds >= threshold:
             set_val(plan_md, "plan_status", "converged")
             log_both(f"✅ 規劃書收斂(連續 {threshold} 個 cycle 穩定且 Gate PASS)。PLAN CONVERGED")
@@ -289,6 +332,12 @@ def _build_tree_gate_prompt(cfg, fw, node_id, decomp_path, requirements):
 
 
 def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
+    import time
+    repo_basename = os.path.basename(os.path.normpath(cfg["repo"]))
+    ws_name = cfg["workspace"]
+    start_epoch = int(time.time())
+    run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
+
     """樹模式規劃迴圈：每 cycle 只拆一個 PENDING 節點。"""
     gen = cfg.get("generation") or {}
     threshold = gen.get("plan_converge_threshold", 2)
@@ -393,6 +442,24 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
                         _build_tree_decompose_prompt(cfg, fw, target, decomp_path, req))
         rc, killed = run_agent(cmd, cfg)
         if killed:
+            append_round_record(cfg, {
+                "run_id": run_id,
+                "ts": datetime.now().strftime("%F %T"),
+                "round": i,
+                "loop_type": "plan",
+                "phase": "plan",
+                "leaf": target,
+                "result": "NA",
+                "mode": "plan",
+                "killed": killed,
+                "stuck_level": node_stuck_level,
+                "rounds_since_progress": rounds_since_progress + 1,
+                "enhanced_rounds_used": 0,
+                "no_activity": 1,
+                "consecutive_pass": 0,
+                "progressed": False,
+                "model_tier": tier,
+            })
             hb(f"  Round A 被 watchdog 中斷（{killed}），清理後重跑。")
             git_guard(cfg, i, log_both)
             time.sleep(interval)
@@ -495,6 +562,25 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
             log_both(f"  ⛔ 樹生長停滯（連續 {growth_stall_count} cycle 無拆解進展，"
                      f"growth_stall_rounds={brk_growth_stall}）→ 凍結交人。")
             return 2
+
+        append_round_record(cfg, {
+            "run_id": run_id,
+            "ts": datetime.now().strftime("%F %T"),
+            "round": i,
+            "loop_type": "plan",
+            "phase": "plan",
+            "leaf": target,
+            "result": gate or "NA",
+            "mode": "plan",
+            "killed": killed,
+            "stuck_level": node_stuck_level,
+            "rounds_since_progress": rounds_since_progress,
+            "enhanced_rounds_used": 0,
+            "no_activity": 0,
+            "consecutive_pass": node_stable_rounds,
+            "progressed": stable,
+            "model_tier": tier,
+        })
 
         time.sleep(interval)
 

@@ -340,4 +340,92 @@ def test_d_features_d5_diff_fallback(monkeypatch):
         assert "diff" in data
         assert data["diff"] == ""
 
+def test_rounds_history_logging():
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "engine"))
+    from state import append_round_record, rounds_log_path
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cfg = {
+            "runtime": {
+                "state_dir": tmpdir
+            }
+        }
+        record = {
+            "run_id": "test_run:default:12345",
+            "round": 1,
+            "loop_type": "execute"
+        }
+        
+        append_round_record(cfg, record)
+        
+        log_file = rounds_log_path(cfg)
+        assert os.path.exists(log_file)
+        
+        import json
+        with open(log_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        assert len(lines) == 1
+        data = json.loads(lines[0].strip())
+        assert data["run_id"] == "test_run:default:12345"
+        assert data["round"] == 1
+
+def test_collect_traces_metrics():
+    import sys
+    import subprocess
+    import json
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_a = os.path.join(tmpdir, "repo-a")
+        repo_b = os.path.join(tmpdir, "repo-b")
+        
+        for r in (repo_a, repo_b):
+            os.makedirs(os.path.join(r, ".loop", "default", ".loop_state"), exist_ok=True)
+            
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("# idx\n\n| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
+            f.write(f"| repo-a | {repo_a} | default | 1 | 0 | tracked | t |\n")
+            f.write(f"| repo-b | {repo_b} | default | 1 | 0 | tracked | t |\n")
+            
+        with open(os.path.join(repo_a, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
+            f.write(json.dumps({"run_id": "a:default:1", "round": 1, "loop_type": "execute", "phase": "2", "result": "FAIL", "consecutive_pass": 0, "progressed": False, "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:00:00"}) + "\n")
+            
+        with open(os.path.join(repo_b, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
+            f.write(json.dumps({"run_id": "b:default:1", "round": 1, "loop_type": "execute", "phase": "2", "result": "FAIL", "consecutive_pass": 0, "progressed": False, "stuck_level": 1, "enhanced_rounds_used": 4, "ts": "2026-06-27 22:00:00"}) + "\n")
+            
+        with open(os.path.join(repo_a, ".loop", "default", ".loop_state", "fail_history"), "w") as f:
+            f.write("fp1\nfp2\nfp2\n")
+        with open(os.path.join(repo_b, ".loop", "default", ".loop_state", "fail_history"), "w") as f:
+            f.write("fp1\n")
+            
+        collect_py = os.path.join(os.path.dirname(os.path.dirname(__file__)), "engine", "collect_traces.py")
+        out_dir = os.path.join(tmpdir, "out")
+        r = subprocess.run([
+            sys.executable, collect_py,
+            "--index", index_path,
+            "--out", out_dir,
+            "--k", "2"
+        ], capture_output=True, text=True)
+        
+        assert r.returncode == 0
+        
+        summary_path = os.path.join(out_dir, "summary.json")
+        assert os.path.exists(summary_path)
+        
+        with open(summary_path, "r") as sf:
+            summary = json.load(sf)
+            
+        assert summary["totals"]["repos"] == 2
+        assert summary["totals"]["rounds"] == 2
+        
+        candidates = summary["cross_project_candidates"]
+        fp1_cand = next(c for c in candidates if c["signal_key"] == "oscillation:fp1")
+        assert fp1_cand["meets_K"] is True
+        assert fp1_cand["distinct_repos"] == 2
+        
+        fp2_cand = next(c for c in candidates if c["signal_key"] == "oscillation:fp2")
+        assert fp2_cand["meets_K"] is False
+
+
+
 

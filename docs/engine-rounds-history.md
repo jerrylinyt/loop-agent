@@ -124,7 +124,7 @@ def append_round_record(cfg: dict, record: dict) -> None:
 
 ## 5. 驗收標準
 
-1. 跑一輪線性 execute（可用本 repo 當對象），`<repo>/.loop/<ws>/.loop_state/rounds.jsonl` 出現新行，欄位齊全、JSON 合法、中文不被跳脫成 `\uXXXX`。
+1. 跑一輪線性 execute（可用本 repo 作為測試目標），`<repo>/.loop/<ws>/.loop_state/rounds.jsonl` 出現新行，欄位齊全、JSON 合法、中文不被跳脫成 `\uXXXX`。
 2. 連跑多輪，每輪 append 一行；中途 `Ctrl+C` 再重啟，新行繼續 append、舊行不被覆寫。
 3. 一輪被 watchdog 中斷（`killed` 非 null）後，該行 `killed` 正確記錄、`result` 為 `NA`。
 4. 樹模式跑一輪，`loop_type="tree"` 且 `leaf` 為當前葉子 id。

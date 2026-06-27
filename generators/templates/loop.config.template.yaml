@@ -10,7 +10,7 @@
 framework_path: ~/.loop/framework            # 外部共享、唯讀的框架 clone（init 時填入實際路徑；每台機器不同）
 
 control: {{LOOP_DIR}}/CONTROL.md
-control_files: [{{LOOP_DIR}}/CONTROL.md, "{{LOOP_DIR}}/phases/*.md"]   # git 守護「整檔被清空」兜底對象（支援 glob）
+control_files: [{{LOOP_DIR}}/CONTROL.md, "{{LOOP_DIR}}/phases/*.md"]   # git 守護「整檔被清空」監控目標（支援 glob）
 
 # ── 生成階段：mode 是每專案決策；其餘收斂門檻走框架預設 ──
 generation:

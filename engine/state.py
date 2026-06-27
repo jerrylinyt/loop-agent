@@ -120,3 +120,21 @@ def save_progress(cfg: dict, **kw):
                 f.write(f"{k}: {v}\n")
     except OSError as e:
         logger.error(f"Failed to save progress: {e}")
+
+
+def rounds_log_path(cfg: dict) -> str:
+    return os.path.join(cfg["runtime"]["state_dir"], "rounds.jsonl")
+
+
+def append_round_record(cfg: dict, record: dict) -> None:
+    """Append 一行逐輪紀錄到 rounds.jsonl。Best-effort：失敗只記 warning，絕不中斷主迴圈。"""
+    p = rounds_log_path(cfg)
+    try:
+        os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+        import json
+        line = json.dumps(record, ensure_ascii=False)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except (OSError, TypeError, ValueError) as e:
+        logger.warning(f"Failed to append round record: {e}")
+

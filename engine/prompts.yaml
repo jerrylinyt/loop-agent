@@ -44,7 +44,7 @@ plan: |
   你正在執行 Loop Engineering【階段②：生成/精修規劃書】（生成輪）。
   讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、context-budget、state-model、convergence、completeness）。
   依 .loop/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 {control} 等規劃書（loop.config.yaml + CONTROL.md + phases/*.md）。
-  🚨 收斂一律依 .loop/rules/convergence.md 協定執行（先不看舊版、從需求獨立重推 → 留痕 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零 → 有疑義從嚴算實質）。不要在此自訂收斂判準。
+  🚨 收斂一律依 .loop/rules/convergence.md 協定執行（先不看舊版、從需求獨立重推 → 留下紀錄 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零 → 有疑義從嚴算實質）。不要在此自訂收斂判準。
   把 {plan_md} 的 plan_changed_last 設 true（本輪有實質改動）/ false（無）。
   寫檔只允許 .loop/，禁止寫框架。結束 git add -A && git commit。
   （Plan Gate 由獨立的審查輪負責，你這輪不需自審。）

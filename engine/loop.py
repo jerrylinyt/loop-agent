@@ -17,7 +17,7 @@ from datetime import datetime
 
 from config import load_config, fmt_prompt, select_model, model_tier_label
 from git_utils import inspect_and_fix_blank, git_guard, expand_control_files
-from state import get_val, set_val, as_int, load_fail_history, save_fail_history, progress_signature, load_progress, save_progress
+from state import get_val, set_val, as_int, load_fail_history, save_fail_history, progress_signature, load_progress, save_progress, append_round_record
 from agent_runner import build_cmd, run_agent
 from utils import (
     WorkspaceBusy, acquire_run_lock, release_run_lock, touch_run_lock, lock_stale_seconds,
@@ -249,6 +249,11 @@ def _run_execute(cfg: dict) -> int:
 
 
 def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
+    repo_basename = os.path.basename(os.path.normpath(cfg["repo"]))
+    ws_name = cfg["workspace"]
+    start_epoch = int(time.time())
+    run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
+
     rt = cfg["runtime"]
     control = cfg["control"]
     osc = cfg["oscillation"]
@@ -428,6 +433,24 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         progress = {"sig": sig, "idle": idle_rounds, "killed_streak": killed_streak,
                     "phase": phase, "last_pass": cur_pass}   # 同步記憶體,供下一輪比對
         save_progress(cfg, **progress)
+        append_round_record(cfg, {
+            "run_id": run_id,
+            "ts": datetime.now().strftime("%F %T"),
+            "round": i,
+            "loop_type": "execute",
+            "phase": phase,
+            "leaf": None,
+            "result": result,
+            "mode": mode,
+            "killed": killed,
+            "stuck_level": stuck_level,
+            "rounds_since_progress": rounds_since,
+            "enhanced_rounds_used": enhanced_used,
+            "no_activity": no_activity,
+            "consecutive_pass": cur_pass,
+            "progressed": progressed,
+            "model_tier": tier,
+        })
 
         time.sleep(rt["interval_seconds"])
 
@@ -436,6 +459,11 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
 
 
 def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
+    repo_basename = os.path.basename(os.path.normpath(cfg["repo"]))
+    ws_name = cfg["workspace"]
+    start_epoch = int(time.time())
+    run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
+
     """樹模式執行：葉子逐一跑、父等子解鎖、回流分兩種。
 
     排程：pick ready leaf → agent 跑葉子 → 收斂 → 解鎖父 → 整合驗證。
@@ -640,6 +668,24 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         progress = {"sig": sig, "idle": idle_rounds, "killed_streak": killed_streak,
                     "phase": phase, "last_pass": cur_pass}
         save_progress(cfg, **progress)
+        append_round_record(cfg, {
+            "run_id": run_id,
+            "ts": datetime.now().strftime("%F %T"),
+            "round": i,
+            "loop_type": "tree",
+            "phase": phase,
+            "leaf": current_leaf,
+            "result": result,
+            "mode": mode,
+            "killed": killed,
+            "stuck_level": stuck_level,
+            "rounds_since_progress": rounds_since,
+            "enhanced_rounds_used": enhanced_used,
+            "no_activity": no_activity,
+            "consecutive_pass": cur_pass,
+            "progressed": progressed,
+            "model_tier": tier,
+        })
 
         # ── 回流偵測：agent 寫 CONTROL 欄位觸發 ──
         structure_err = get_val(control, "tree_structure_error") or ""
