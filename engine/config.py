@@ -28,6 +28,14 @@ DEFAULTS = {
     "control": "CONTROL.md",
     "control_files": ["CONTROL.md", "phases/*.md"],
     "workspace": {"mode": "in_repo"},
+    # ── 生成階段（階段②：plan_loop.py 規劃書收斂）。專案 config 只需覆寫 mode 與 per-workspace log_file ──
+    "generation": {
+        "mode": "gated",                # gated（收斂停下交人 review）/ auto（自動接執行）
+        "plan_converge_threshold": 2,   # 連續幾個 cycle「無實質變更且 Plan Gate PASS」才算收斂
+        "max_rounds": 30,
+        "interval_seconds": 10,
+        "log_file": "./.loop/plan.log", # 專案用 {{LOOP_DIR}} 覆寫成 per-workspace 路徑
+    },
     "phases": [],                       # 由專案 config 提供
     "stop_condition": {
         "final_phase_pass_gte": 10,
