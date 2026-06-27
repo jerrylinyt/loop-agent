@@ -1,7 +1,7 @@
 # 引擎側需求：逐輪歷史 `rounds.jsonl`
 
 > 給**引擎實作 agent** 的工作說明書（動的是 `engine/`，不是 dashboard）。
-> 目的：讓引擎在每一輪結束時，append 一行結構化紀錄到 workspace 的狀態夾，作為 dashboard「進度趨勢」(見 [`dashboard-improvements.md` D3](dashboard-improvements.md)) 與任何離線分析的單一事實來源。
+> 目的：讓引擎在每一輪結束時，append 一行結構化紀錄到 workspace 的狀態夾，作為 dashboard 進度趨勢圖（D3 sparkline）與任何離線分析的單一事實來源。
 >
 > **核心原則**：這是**唯讀於既有狀態、只新增一個檔**的低風險改動。**不得**改動 CONTROL.md / TREE.md 既有欄位語意、不得改變現有控制流程或回傳碼。若這行寫入失敗，**引擎必須照常繼續跑**（best-effort，吞例外、記 warning）。
 
@@ -136,4 +136,4 @@ def append_round_record(cfg: dict, record: dict) -> None:
 
 ## 6. 與 dashboard 的介面契約（給 dashboard 端對齊）
 
-dashboard 將新增 `GET /api/projects/{id}/rounds?limit=N`：讀此檔最後 N 行、逐行 `json.loads`、回成陣列（壞行跳過）。前端用 §1 的欄位畫 sparkline（`stuck_level` 隨序變化、`result`/`progressed` 標點）。**欄位名是兩端的契約**，若引擎端調整欄位，需同步更新 [`dashboard-improvements.md` D3](dashboard-improvements.md)。
+dashboard 將新增 `GET /api/projects/{id}/rounds?limit=N`：讀此檔最後 N 行、逐行 `json.loads`、回成陣列（壞行跳過）。前端用 §1 的欄位畫 sparkline（`stuck_level` 隨序變化、`result`/`progressed` 標點）。**欄位名是兩端的契約**，若引擎端調整欄位，dashboard 的 `/rounds` 解析與 sparkline 需同步調整。

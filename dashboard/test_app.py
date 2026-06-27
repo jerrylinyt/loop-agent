@@ -91,6 +91,23 @@ def test_set_control_val_and_parse():
         assert data_mod["human_required"] == "false"
         assert data_mod["current_phase"] == "1"
         
+def test_parse_control_threshold_normalization():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        control_path = os.path.join(tmpdir, "CONTROL.md")
+        with open(control_path, "w", encoding="utf-8") as f:
+            f.write("p1_consecutive_pass: 1\n")
+            f.write("p2_consecutive_pass: 2\n")
+        # config: phase 1 numeric threshold, phase 2 placeholder string
+        with open(os.path.join(tmpdir, "loop.config.yaml"), "w", encoding="utf-8") as f:
+            f.write("phases:\n")
+            f.write("  - { id: 1, converge_threshold: 3 }\n")
+            f.write("  - { id: 2, converge_threshold: <placeholder> }\n")
+        data = parse_control_file(control_path)
+        by_id = {p["id"]: p for p in data["phases"]}
+        assert by_id["1"]["threshold"] == 3          # numeric kept as int
+        assert by_id["2"]["threshold"] is None        # placeholder -> None (UI shows plain count)
+
+
 def test_extract_human_context():
     with tempfile.NamedTemporaryFile(delete=False, mode="w+", encoding="utf-8") as tmp:
         tmp.write("log line 1\n")

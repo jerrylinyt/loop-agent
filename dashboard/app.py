@@ -175,7 +175,14 @@ def parse_control_file(control_path: str) -> dict:
                         for p_conf in phases_conf:
                             if isinstance(p_conf, dict) and "id" in p_conf:
                                 p_id = str(p_conf["id"])
-                                thresholds[p_id] = p_conf.get("converge_threshold")
+                                # Only keep numeric thresholds; un-filled configs carry a
+                                # placeholder string (e.g. "<逐階段自訂…>") which must become
+                                # None so the UI falls back to a plain count instead of a
+                                # misleading "X/1 = 100%" progress bar.
+                                try:
+                                    thresholds[p_id] = int(p_conf.get("converge_threshold"))
+                                except (TypeError, ValueError):
+                                    thresholds[p_id] = None
         except Exception:
             pass
 
