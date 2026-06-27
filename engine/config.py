@@ -7,7 +7,6 @@ logger = logging.getLogger(__name__)
 # ─────────────── 框架預設（cascade 最底層） ───────────────
 DEFAULTS = {
     "framework_path": os.path.expanduser("~/.loop/framework"),
-    "profile": os.path.expanduser("~/.loop/profile.yaml"),
     "index": os.path.expanduser("~/.loop/index.md"),   # 跨專案總覽（自動維護）
     "control": "CONTROL.md",
     "control_files": ["CONTROL.md", "phases/*.md"],
@@ -28,11 +27,23 @@ DEFAULTS = {
         "enhanced_max_rounds": 8,
         "human_stop_after": 4,
     },
+    # ── 最小工作單位 proxy 圍欄（可校準） ──
+    "min_unit": {
+        "max_files": 3,
+        "max_lines": 150,
+    },
+    # ── 硬 breaker：撞線即凍結交人，程式不准自我放寬（可校準） ──
+    "breaker": {
+        "max_depth": 5,
+        "max_leaves": 1000,        # 刻意設大——明顯壞掉才觸發的跳閘，非壓樹目標
+        "max_leaf_reflow": 3,
+        "growth_stall_rounds": 6,
+    },
     "runtime": {
         "max_rounds": 600,
-        "interval_seconds": 30,
-        "round_timeout_seconds": 1800,
-        "idle_timeout_seconds": 300,
+        "interval_seconds": 5,
+        "round_timeout_seconds": 3600,
+        "idle_timeout_seconds": 1800,
         "control_min_bytes": 200,
         "log_file": "./loop.log",
         "state_dir": "./.loop_state",
@@ -45,19 +56,27 @@ DEFAULTS = {
     # ── Agent 指令與提示（全抽成設定；code 只讀這裡，不寫死）──
     "agent": {
         # 指令樣板：{model}/{prompt} 帶入；可選 {args} 佔位插入 extra_args（{prompt} 保持單一參數）
-        "build_cmd": "codex e --model {model} {prompt}",
+        "build_cmd": "opencode run -m {model} {prompt}",
         # 額外固定 CLI 參數（如 ["--yolo"]）；template 無 {args} 佔位時，接在 {prompt} 之前
         "extra_args": [],
         "models": {
-            "default": "<你的預設模型>",
-            "enhanced": "<你的增強模型>",     # 卡住時切換的更強模型
+            "fast": "flash",  # 葉子執行（可校準）
+            "normal": "",     # review／整合驗證（可校準）
+            "thinking": "",   # 拆解／分析（可校準）
         },
-        # 提示樣板（佔位：{control} {framework} {plan_md} {requirements}）。省略則用以下預設。
+        # ── 角色維預設指派（可校準） ──
+        "roles": {
+            "decompose": "thinking",
+            "review": "normal",
+            "integrate": "normal",
+            "execute": "fast",
+        },
+        # 提示樣板（佔位：{control} {plan_md} {requirements}）。省略則用以下預設。
         "prompts": {
             "base": (
-                "請讀取 {control}，依 {framework}/rules/boot-sequence.md 的 BOOT SEQUENCE 開始工作"
-                "（先做 STEP G 的 Git 自檢、結束做 STEP C 的提交）。"
-                "本輪必讀：{control} 與 {framework}/rules/boot-sequence.md；其餘 rules 按需讀。"
+                "請讀取 {control}，依 .loop/rules/boot-sequence.md 的 BOOT SEQUENCE 開始工作"
+                "（結束時做 STEP C 的提交）。"
+                "本輪必讀：{control} 與 .loop/rules/boot-sequence.md；其餘 rules 按需讀。"
                 "每輪務必回填 last_round_mode / last_round_result / last_round_fail_tasks。"
             ),
             "escalation": (
@@ -66,11 +85,23 @@ DEFAULTS = {
                 "(2) 規格矛盾（兩條規格本質衝突）→ 不要硬修，開 BLOCKING Issue 寫清楚衝突與出處，"
                 "把涉及任務標 FROZEN，交人類裁決。判斷依據寫進 Issue/修正記錄。"
             ),
+            "git_review": (
+                "你正在執行 Loop Engineering 的【獨立 Git Review Gate】（全新 context，只審不寫 code）。\n"
+                "目標：審查上一次的 Commit Diff 是否合理，並驗證核心狀態檔是否遭到破壞，防止 Agent 幻覺搞砸大腦。\n"
+                "讀取：.loop/rules/git-review-gate.md 的檢查規則。\n"
+                "輸入 Diff 如下：\n"
+                "{diff_content}\n\n"
+                "目前狀態檔的完整內容如下：\n"
+                "{control_contents}\n\n"
+                "請依據規則嚴格審查，並將最終判決寫入 `{result_file}` 檔案中\n"
+                "（請直接覆寫該檔，內容只要一行 `[REVIEW: PASS]` 或 `[REVIEW: REVERT] <具體原因>` 或 `[REVIEW: FATAL_STATE] <具體原因>`）。\n"
+                "寫檔完成後直接結束，不需執行 git commit。"
+            ),
             "plan": (
                 "你正在執行 Loop Engineering【階段②：生成/精修規劃書】（生成輪）。\n"
-                "讀 {requirements} + 框架 rules（{framework}/rules/ 的 BLUEPRINT、context-budget、"
+                "讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、context-budget、"
                 "state-model、convergence、completeness）。\n"
-                "依 {framework}/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 "
+                "依 .loop/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 "
                 "{control} 等規劃書（loop.config.yaml + CONTROL.md + phases/*.md）。\n"
                 "收斂迴圈：若已存在規劃書，請『先不看舊版、從需求獨立重推一份』再與現有比對；\n"
                 "  僅在有『實質差異』時才修改檔案；無實質差異就不要動檔。\n"
@@ -81,16 +112,101 @@ DEFAULTS = {
             "plan_gate": (
                 "你正在執行 Loop Engineering【階段②的獨立 Plan Gate】（全新 context，只審不生）。\n"
                 "讀 {requirements} + .loop/ 的 loop.config.yaml / CONTROL.md / phases/*.md "
-                "+ {framework}/generators/2-plan-review-gate.md。\n"
+                "+ .loop/generators/2-plan-review-gate.md。\n"
                 "逐項檢查 Gate（需求全覆蓋 / 任務粒度 / 無循環依賴 / 停止可判讀 / 收斂就位 / "
                 "逃生門 / context 防爆 / 框架唯讀 / 引擎可讀 / 輪數估算）。\n"
                 "❗只審查、不要修改任何規劃書檔（read-only verify）。\n"
                 "把結果寫進 {plan_md}：plan_gate_last= PASS（全過）或 FAIL（未過項記到 plan.log）。\n"
                 "結束 git add -A && git commit（理論上只有 {plan_md} 會變）。"
             ),
+            # ── 漸進拆解（樹模式） ──
+            "tree_decompose": (
+                "你正在執行 Loop Engineering【規劃期：漸進拆解】。本輪只拆解一個節點。\n"
+                "目標節點：{node_id}（工單見 {decomp_file}）。\n"
+                "讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、convergence、"
+                "completeness、context-budget）。\n"
+                "獨立重推：將此節點拆成子項，寫進 {decomp_file}。\n"
+                "  - proposed_children: 逗號分隔的子項 ID（簡短 slug）\n"
+                "  - 每個子項加 child_{{id}}_type = leaf（可獨立驗證的最小工作單位）或 pending（需進一步拆）\n"
+                "  - 每個子項加 child_{{id}}_summary = 一句話描述\n"
+                "收斂迴圈：若已有提議，先不看舊版、從需求獨立重推一份再比對；\n"
+                "  僅在有實質差異時才修改；無差異就不動檔。\n"
+                "把 decomp_changed_last 設 true（有改動）/ false（無）。\n"
+                "寫檔只允許 {decomp_file}。結束 git add -A && git commit。"
+            ),
+            "tree_decompose_gate": (
+                "你正在執行 Loop Engineering【規劃期：拆解審查】（全新 context，只審不生）。\n"
+                "審查 {decomp_file} 中 {node_id} 的拆解結果。\n"
+                "讀 {requirements} + .loop/rules/convergence.md + completeness.md。\n"
+                "檢查：子項是否互不重疊、是否涵蓋父節點所有面向、\n"
+                "  leaf 子項是否真的可獨立驗證且符合最小工作單位（≤ {max_files} 檔、≤ {max_lines} 行、"
+                "單一關注點）。\n"
+                "❗只審查、不修改拆解結果。\n"
+                "把結果寫進 {decomp_file}：decomp_gate_last = PASS 或 FAIL。\n"
+                "結束 git add -A && git commit。"
+            ),
         },
     },
 }
+
+
+def _normalize_models(models: dict) -> dict:
+    """單向相容：為支援舊版 (default/enhanced) 設定檔，自動轉為新鍵 (fast/normal/thinking)。"""
+    m = dict(models)
+    
+    if m.get("default") and not m.get("fast"):
+        m["fast"] = m.get("default")
+    if m.get("enhanced") and not m.get("thinking"):
+        m["thinking"] = m.get("enhanced")
+        
+    if not m.get("normal"):
+        m["normal"] = m.get("enhanced") or m.get("default") or ""
+        
+    return m
+
+
+_UPGRADE_CHAIN = ("fast", "normal", "thinking")
+
+
+def select_model(cfg: dict, role: str, stuck_level: int = 0) -> str:
+    """(角色 × stuck_level) 二維模型選擇。
+
+    順風 (stuck_level=0) → roles[role] 指定的模型層。
+    卡住 → 沿 fast→normal→thinking 往上爬。
+    """
+    models = cfg["agent"]["models"]
+    roles = cfg["agent"].get("roles", {})
+    base_key = roles.get(role, "normal")
+    if stuck_level <= 0:
+        return models.get(base_key) or ""
+    try:
+        idx = _UPGRADE_CHAIN.index(base_key)
+    except ValueError:
+        idx = 1
+    upgraded_idx = min(idx + stuck_level, len(_UPGRADE_CHAIN) - 1)
+    upgraded_key = _UPGRADE_CHAIN[upgraded_idx]
+    return models.get(upgraded_key) or ""
+
+
+def model_tier_label(cfg: dict, role: str, stuck_level: int = 0) -> str:
+    """回傳人類可讀的模型層標籤，用於 log 顯示。
+
+    順風 → 角色預設（如 "fast"）。
+    卡住 → "base_key→upgraded_key"（如 "fast→normal"）。
+    """
+    roles = cfg["agent"].get("roles", {})
+    base_key = roles.get(role, "normal")
+    if stuck_level <= 0:
+        return base_key
+    try:
+        idx = _UPGRADE_CHAIN.index(base_key)
+    except ValueError:
+        idx = 1
+    upgraded_idx = min(idx + stuck_level, len(_UPGRADE_CHAIN) - 1)
+    upgraded_key = _UPGRADE_CHAIN[upgraded_idx]
+    if upgraded_key == base_key:
+        return base_key  # 已在最高層，無處可升
+    return f"{base_key}→{upgraded_key}"
 
 
 def fmt_prompt(template: str, **kw) -> str:
@@ -124,44 +240,16 @@ def deep_merge(base: dict, over: dict) -> dict:
 
 
 def load_config() -> dict:
-    """cascade：框架預設 < profile < 專案 config < 環境變數。"""
+    """cascade：框架預設 < 專案 config。"""
     cfg = dict(DEFAULTS)
     project_path = os.environ.get("LOOP_CONFIG", "./loop.config.yaml")
     project = load_yaml(project_path)
-    # profile 路徑可被專案 config 指定
-    profile_path = project.get("profile") or os.environ.get("LOOP_PROFILE") or cfg["profile"]
-    profile = load_yaml(profile_path)
-    cfg = deep_merge(cfg, profile)
     cfg = deep_merge(cfg, project)
     
-    # 環境變數覆蓋（與舊版相容的少數常用旗標）
-    env_map = {
-        "MAX_ROUNDS": ("runtime", "max_rounds", int),
-        "INTERVAL": ("runtime", "interval_seconds", int),
-        "LOG_FILE": ("runtime", "log_file", str),
-        "ROUND_TIMEOUT": ("runtime", "round_timeout_seconds", int),
-        "IDLE_TIMEOUT": ("runtime", "idle_timeout_seconds", int),
-        "CONTROL": (None, "control", str),
-        # DEFAULT_MODEL / ENHANCED_MODEL 在下方明確導向 agent.models
-    }
-    for env, (sect, key, cast) in env_map.items():
-        if env in os.environ:
-            try:
-                val = cast(os.environ[env])
-                if sect:
-                    cfg.setdefault(sect, {})[key] = val
-                else:
-                    cfg[key] = val
-            except ValueError:
-                logger.warning(f"Invalid environment variable format for {env}: {os.environ[env]}")
-
     # 確保 agent 結構完整（缺的鍵用框架預設補；整段覆蓋也安全；同時避免回寫汙染 DEFAULTS）
     cfg["agent"] = deep_merge(DEFAULTS["agent"], cfg.get("agent", {}))
 
-    # env：模型覆蓋導向 agent.models
-    if "DEFAULT_MODEL" in os.environ:
-        cfg["agent"]["models"]["default"] = os.environ["DEFAULT_MODEL"]
-    if "ENHANCED_MODEL" in os.environ:
-        cfg["agent"]["models"]["enhanced"] = os.environ["ENHANCED_MODEL"]
+    # 雙向鏡射：確保 default/enhanced ↔ fast/normal/thinking 五鍵齊全
+    cfg["agent"]["models"] = _normalize_models(cfg["agent"]["models"])
     return cfg
 
