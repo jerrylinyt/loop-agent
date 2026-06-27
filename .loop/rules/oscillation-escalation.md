@@ -36,7 +36,6 @@
   - 開啟一個 `BLOCKING` 狀態的 Issue，清晰記錄衝突根因。
   - 將涉及的互卡任務改為 `FROZEN`，跳過不執行。
   - 當所有非凍結任務均無法執行時，停下交人類處理 (`human_required=true`)。
-  - 🚨 設定 `human_required=true`、開完 BLOCKING Issue、凍結互卡任務後，該 agent 必須【立即停止輸出、結束本 process】，把控制權交還引擎等待人類裁決。❌ 嚴禁在卡死/升級情境下還自行續推下一輪或反覆重試燒模型。
 
 ---
 
