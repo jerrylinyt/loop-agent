@@ -14,7 +14,6 @@
    人類確認 → **停下來**,把下一步的 `run.py` 指令交給人類自己貼上去跑。
 3. ❗**絕不要**自己接著跑 `plan_loop.py` / `run.py` / `loop.py`——那是會跑到收斂為止的長迴圈、會燒用量,
    啟動與否是刻意保留給人類的決策點,不是技術限制。
-4. (選用)使用者要「裝一個可重複呼叫的捷徑(/指令、skill)」→ 見 `integrations/` 範例,依他的 CLI 自己生成,不靠安裝腳本。
 
 ---
 
@@ -37,7 +36,7 @@
 
 ## 怎麼開始
 
-最省事:把 `generators/bootstrap.md` 交給你的 agent(Claude Code 可打 `/loop-prep`),它會幫你開 workspace、訪談需求,
+最省事:把 `generators/bootstrap.md` 交給你的 agent,它會幫你開 workspace、訪談需求,
 **停在你該跑 python 之前**。以下是它背後實際做的事,也可以自己手動走:
 
 ```bash
