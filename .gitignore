@@ -4,13 +4,6 @@ __pycache__/
 .idea/
 *.iml
 
-# Loop Engineering 產物
-.loop/*/loop.log
-.loop/*/loop.log.*
-.loop/*/plan.log
-.loop/*/plan.log.*
-.loop/*/.loop_state/
-
 # Python test artifacts
 .coverage
 .pytest_cache/

@@ -3,8 +3,6 @@
 Loop 引擎的本機 Web 控制台：在一個瀏覽器頁面管理多個專案/workspace，啟動或停止引擎、看即時 log、編輯設定、檢視規劃樹。
 
 > 這是一個**本機工具**，預設只綁 `127.0.0.1`，無帳號驗證——不要把它對外開放。
->
-> 想知道未來會新增哪些功能、以及目前已知的缺口，見 [`docs/dashboard-improvements.md`](../docs/dashboard-improvements.md)。本檔只描述**現況**。
 
 ---
 
@@ -95,7 +93,7 @@ Dashboard 本身**不存任何狀態**，所有資訊都即時讀自檔案系統
 A：`~/.loop/index.md` 還沒有任何專案。用 **+ Init** 初始化一個 repo，或 **+ Track** 把既有 workspace 加進來。
 
 **Q：Live Logs 打開是空白？**
-A：目前的串流只接「之後」的新行，專案沒在跑時不會顯示歷史內容（已知限制，見 [improvements 文件 A1](../docs/dashboard-improvements.md)）。先 Start 起來就會有輸出。
+A：目前的串流只接「之後」的新行，專案沒在跑時不會顯示歷史內容（已知限制）。先 Start 起來就會有輸出。
 
 **Q：badge 一直卡在 Running、按 Start 沒反應？**
 A：可能是殘留的 `run.lock`（已知限制，見 improvements A2）。手動刪除 `<repo>/.loop/<ws>/.loop_state/run.lock` 後重試。
@@ -116,4 +114,4 @@ dashboard/
 └── README.md         # 本檔
 ```
 
-> 已知缺口與規劃中的新功能（log 補歷史、清 lock、human_required 處理、桌面通知、活動時間軸、diff 檢視…）詳列於 [`docs/dashboard-improvements.md`](../docs/dashboard-improvements.md)。
+> 已知缺口：log 補歷史、清殘留 lock、human_required 處理、桌面通知、活動時間軸、diff 檢視等。

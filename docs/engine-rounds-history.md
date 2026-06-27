@@ -1,5 +1,7 @@
 # 引擎側需求：逐輪歷史 `rounds.jsonl`
 
+> **⚠️ 已實作** — 本規格已落地於 [`engine/state.py`](../engine/state.py) 與 [`engine/loop.py`](../engine/loop.py)。如有差異，以程式碼為準。
+
 > 給**引擎實作 agent** 的工作說明書（動的是 `engine/`，不是 dashboard）。
 > 目的：讓引擎在每一輪結束時，append 一行結構化紀錄到 workspace 的狀態夾，作為 dashboard 進度趨勢圖（D3 sparkline）與任何離線分析的單一事實來源。
 >
