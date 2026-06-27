@@ -89,6 +89,38 @@ python3 $FW/engine/run.py --workspace featureA              # 跑 A;停了之後
 python3 $FW/engine/run.py --workspace featureB              # 跑 B
 ```
 
+### 需要參考另一個專案的 code？把它「掛」成唯讀輸入（git worktree）
+loop 一律從**被改的 code repo 根目錄**啟動,agent 的可視範圍就是這個 repo(cwd)。所以遇到
+「把舊專案的 API refactor 進新專案」這種**跨專案**需求,**不要**把 cwd 往上層搬、也不要替各家
+CLI(claude_code / opencode / codex)各寫一套 `--add-dir` 旗標——那會打破 git 安全網的還原點語意,
+又不通用。三家 CLI 唯一保證一致的行為是「**讀得到 cwd 底下的檔案**」,所以正解是把參考來源
+**掛進 cwd 底下當唯讀輸入**。
+
+來源也是 git repo 時,用 `git worktree` 最省:它在新專案底下「多攤開一個資料夾」放舊專案的**真實
+檔案**,但**共用舊專案的 git 歷史、幾乎不佔空間**(不是 `cp -R` 整碗搬,也不是 symlink——symlink
+指到 cwd 外可能被 CLI 的 sandbox 擋掉,不保證跨 CLI)。
+
+```bash
+# 在「新專案」(被改的 code repo) 根目錄執行；OLD = 舊專案路徑、<name> = 你的 workspace
+git -C /path/to/OLD worktree add ./.loop/<name>/inputs/old HEAD   # 掛上唯讀參考
+echo ".loop/*/inputs/" >> .gitignore                              # 讓 git 安全網看不到它(不被一輪一commit收進去)
+chmod -R a-w ./.loop/<name>/inputs/old                            # 防呆：把參考設成唯讀
+# …在 REQUIREMENTS.md §4 輸入 註明這個路徑是「唯讀參考」，跑完 loop 後：
+git -C /path/to/OLD worktree remove ./.loop/<name>/inputs/old     # 用完即清，無殘留
+```
+> 為什麼這樣最穩:檔案實體在 cwd 內 → 三家 CLI 都讀得到;`.gitignore` 後它對 `git add -A` /
+> review-gate 的 `HEAD~1..HEAD` diff 隱形 → **還原點仍只管你真正在改的新專案**;寫入仍只發生在
+> 新專案這一個 git 樹裡(唯一可寫單位)。多個參考來源就掛多個 `inputs/<別名>`。
+
+**進階(選用,CLI-specific):自行放寬 agent 的可讀範圍**
+如果你**固定用某一家 CLI**、又常要跨專案參考,可以改用該 CLI 自己的設定,把整個 `root_code_dir`
+(你放所有專案的母目錄)加進 agent 的**可讀**範圍,省掉每次掛 worktree。例如:opencode 在它的
+config / `AGENTS.md`、claude_code 用 `--add-dir` 或 settings、codex 用 sandbox 設定。
+代價是**不通用**(換 CLI 要重設)、且**只放寬「讀」**——寫入與 git 還原點仍只在被改的 repo 內,
+所以務必讓多出來的範圍維持**唯讀**,別讓 agent 去改別的專案(那裡沒有安全網)。
+> 預設仍建議 worktree(三家通用、來源隨 worktree 釘在某個 commit、用完即清);放寬可讀範圍是
+> 「我清楚自己用哪家 CLI」的人的捷徑。兩者可並存:常用的母目錄走可讀範圍,要釘版/要乾淨隔離的單一來源走 worktree。
+
 ## 完整流程圖（從 init-project 到收斂）
 
 > 上方 ①②③ 是高層次概念；這張圖把「實際會跑的指令、人類 gate 的位置、執行迴圈裡每輪疊了什麼防護」全部展開，方便第一次上手對齊心智模型。

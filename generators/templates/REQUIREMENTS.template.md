@@ -19,6 +19,7 @@
 - 位置:<資料/原始碼在哪>
 - 格式:<…>
 - 是否近似重複:<是→可套 base+變體;否>
+- 跨專案唯讀參考:<無 / 路徑 ./.loop/<name>/inputs/<別名>/（另一個 repo 用 `git worktree add` 掛進來、`.gitignore` 掉、chmod 唯讀；用完 `git worktree remove`）>
 
 ## 5. 限制與已知風險
 - <技術限制 / 不能動的東西 / 外部依賴 / 已知地雷>
