@@ -178,6 +178,12 @@ def preflight(cfg: dict, stage: str) -> tuple[list[str], list[str]]:
             
     if not cfg.get("phases"):
         (errors if stage == "execute" else warnings).append("config 沒有 phases 定義。")
+    # converge_threshold 是 agent 逐階段自訂的門檻；若還是 <…> placeholder = 生成階段沒填 → 提醒（不擋）
+    for ph in (cfg.get("phases") or []):
+        ct = ph.get("converge_threshold")
+        if ct is not None and _is_placeholder(ct):
+            warnings.append(f"phase {ph.get('id', '?')} 的 converge_threshold 仍是 placeholder（{ct}）"
+                            f"——應由生成 agent 依任務風險填上實際門檻（見 convergence.md）。")
 
     loop_dir = os.path.dirname(cfg.get("control", "")) or "."
     req = os.path.join(loop_dir, "REQUIREMENTS.md")

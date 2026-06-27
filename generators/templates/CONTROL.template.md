@@ -48,7 +48,7 @@ last_round_fail_tasks: ""
 
 rounds_since_progress: 0
 stuck_level: 0
-current_model_tier: default
+current_model_tier: ""               # 引擎回填：fast / normal / thinking（升級鏈如 fast→normal）
 enhanced_rounds_used: 0
 human_required: false
 ```
@@ -61,7 +61,7 @@ human_required: false
 ## Phase 1（<名稱>）狀態表
 | # | 任務 | 產出位置 | Status | Conv | Round |
 |---|------|---------|--------|------|-------|
-| 01 | <…> | <…> | TODO | 0/2 | - |
+| 01 | <…> | <…> | TODO | 0/<門檻> | - |
 
 ## Coverage 定義與統計（每指標寫清楚分母來源）
 | 指標 | 分母 | 分子 | % | 更新 Round |

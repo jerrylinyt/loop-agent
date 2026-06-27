@@ -50,7 +50,7 @@ plan_version: 1
 # 卡死偵測與升級（與 loop.py 對稱;多由 plan_loop.py 維護）
 plan_rounds_since_progress: 0
 plan_stuck_level: 0
-plan_model_tier: default       # default / enhanced
+plan_model_tier: ""            # 引擎回填：fast / normal / thinking
 plan_enhanced_rounds_used: 0
 plan_human_required: false
 ```

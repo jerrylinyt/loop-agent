@@ -20,13 +20,15 @@ generation:
 # ── 階段定義（每專案核心：幾個階段、叫什麼、產出去哪、收斂門檻）；is_done/PhaseGate 全依此 ──
 # 最後一筆 = 最終階段。階段數由專案決定（不限 2）。output 相對 repo 根（程式碼落 src/，跨 workspace 共用；
 # 分析文件落 {{LOOP_DIR}}/docs/，每個 workspace 各自獨立，避免多份需求互相覆蓋）。
+# ⚠️ converge_threshold = 該階段每個任務的「單任務收斂門檻」，由生成 agent 依任務風險【逐階段自訂】，
+#    不是固定值——請勿照抄範例數字（見 rules/convergence.md 三層收斂；典型 2~3、高風險更高；Init 類任務可省略此欄）。
 phases:
-  - { id: 1, name: 階段一, spec: {{LOOP_DIR}}/phases/PHASE1.md, output: {{LOOP_DIR}}/docs/, converge_threshold: 2 }
-  - { id: 2, name: 階段二, spec: {{LOOP_DIR}}/phases/PHASE2.md, output: src/, converge_threshold: 2 }
+  - { id: 1, name: <階段一名稱>, spec: {{LOOP_DIR}}/phases/PHASE1.md, output: {{LOOP_DIR}}/docs/, converge_threshold: "<逐階段自訂_見convergence.md>" }
+  - { id: 2, name: <階段二名稱>, spec: {{LOOP_DIR}}/phases/PHASE2.md, output: src/, converge_threshold: "<逐階段自訂_見convergence.md>" }
 
-# ── 進階收斂門檻（非每專案都有；生成器按需加）──
+# ── 進階收斂門檻（非每專案都有；大範圍防漏任務才加，見 rules/completeness.md。值由 agent 依任務自訂，勿照抄）──
 extra_thresholds:
-  page_converge: 3
+  page_converge: "<集合穩定收斂門檻_見completeness.md>"
 
 # ── 執行階段：只需覆寫 per-workspace 路徑；timeout / 防爆等旋鈕走框架預設 ──
 runtime:
