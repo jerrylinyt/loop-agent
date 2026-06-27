@@ -23,7 +23,9 @@ STEP 2 ▶ 檢查停止條件(依 config.stop_condition):
             blocking_issues == 0:
              → 輸出「LOOP COMPLETE」後【立即停止輸出並結束本 process】(停機定義見 STEP 10),
                控制權交還外部引擎。
-         IF stop_condition_met==true → 同樣輸出「LOOP COMPLETE」並【立即停止輸出、結束 process】。
+         ⚠️ `stop_condition_met` 只是註記欄,【不是】獨立停止捷徑:引擎只認上面那組客觀條件
+            (計數器 + blocking),不會因為它被設成 true 就停(見 utils.py is_done)。
+            ❌ 嚴禁:把 `stop_condition_met` 自寫成 true 來跳過計數器/blocking 收工。
          🚨 強制約束:最終停止比照 Phase Gate,【必須】先確認最後 phase「全任務 CONVERGED」。
             ❌ 嚴禁:最後 phase 仍有任何 FROZEN/PENDING/NEEDS_REVISION 任務時就輸出 LOOP COMPLETE
                ——FROZEN 代表未完成的待裁決項,不能靠 p_pass 灌滿混過停止(此縫常配合把 BLOCKING

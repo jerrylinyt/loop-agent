@@ -255,18 +255,23 @@ def final_phase_id(cfg: dict) -> str | None:
 
 
 def is_done(cfg: dict, control: str) -> bool:
+    """停止只認【客觀計數器路徑】:current_phase==最後階段 且 p{last}_pass>=門檻 且 blocking==0。
+
+    ⚠️ 安全：刻意【不】把 agent 自寫的 done_flag(stop_condition_met) 當成獨立停止捷徑——
+    否則弱模型只要寫一行 `stop_condition_met: true` 就能無條件跳過計數器/blocking 收工
+    (對抗式稽核 #4)。done_flag 現為 inert 註記欄,非觸發器；真正的「全任務 CONVERGED」
+    由 agent 在 boot STEP 2 把關 + Git Review Gate 兜底。
+    """
     sc = cfg["stop_condition"]
-    if get_val(control, sc["done_flag"]) == "true":
-        return True
     last = final_phase_id(cfg)
     if last is None:
         return False
     phase = get_val(control, "current_phase")
-    if str(phase) == str(last) \
-       and as_int(get_val(control, f"p{last}_consecutive_pass")) >= sc["final_phase_pass_gte"] \
-       and as_int(get_val(control, sc["blocking_field"])) == sc["blocking_eq"]:
-        return True
-    return False
+    return (
+        str(phase) == str(last)
+        and as_int(get_val(control, f"p{last}_consecutive_pass")) >= sc["final_phase_pass_gte"]
+        and as_int(get_val(control, sc["blocking_field"])) == sc["blocking_eq"]
+    )
 
 
 def human_needed(cfg: dict, control: str) -> bool:
