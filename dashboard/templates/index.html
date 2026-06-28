@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,6 +16,7 @@
             padding: 10px;
             border-radius: 8px;
         }
+
         /* Horizontal Tree layout styling */
         .tree-horiz ul {
             display: flex;
@@ -23,6 +25,7 @@
             position: relative;
             margin: 0;
         }
+
         .tree-horiz li {
             display: flex;
             flex-direction: row;
@@ -30,6 +33,7 @@
             position: relative;
             padding: 10px 0 10px 20px;
         }
+
         /* Horizontal lines */
         .tree-horiz li::before {
             content: '';
@@ -39,6 +43,7 @@
             border-top: 2px solid #4b5563;
             width: 20px;
         }
+
         /* Vertical line to connect siblings */
         .tree-horiz li::after {
             content: '';
@@ -48,17 +53,20 @@
             bottom: 0;
             border-left: 2px solid #4b5563;
         }
+
         /* Adjust sibling connectors for first/last children */
         .tree-horiz li:first-child::after {
             top: 50%;
         }
+
         .tree-horiz li:last-child::after {
             bottom: 50%;
         }
+
         .tree-horiz li:only-child::after {
             display: none;
         }
-        
+
         /* Node Card Styles */
         .node-card {
             background-color: #1f2937;
@@ -70,16 +78,18 @@
             min-width: 160px;
             z-index: 10;
         }
+
         .node-card:hover {
             border-color: #3b82f6;
             transform: translateY(-1px);
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
+
         .node-card.selected {
             border-color: #3b82f6;
             box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
         }
-        
+
         /* Parent to vertical line connector */
         .tree-horiz ul ul::before {
             content: '';
@@ -91,20 +101,25 @@
         }
     </style>
 </head>
+
 <body class="bg-gray-900 text-white min-h-screen">
     <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4 flex justify-between items-center">
         <h1 class="text-2xl font-bold text-blue-400">Loop Engineering Dashboard</h1>
         <div class="flex items-center gap-4">
             <!-- Notification Toggle -->
-            <button id="btn-notification-toggle" onclick="toggleNotifications()" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 transition">
+            <button id="btn-notification-toggle" onclick="toggleNotifications()"
+                class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 transition">
                 <span id="notification-icon">🔔</span>
                 <span id="notification-text">Enable notifications</span>
             </button>
             <div id="global-summary" class="flex items-center gap-3 text-sm">
                 <span class="text-gray-400">Total <span id="sum-total" class="text-white font-bold">0</span></span>
-                <span class="px-2 py-0.5 bg-green-700 text-white rounded">Running <span id="sum-running" class="font-bold">0</span></span>
-                <span class="px-2 py-0.5 bg-yellow-700 text-white rounded">Action <span id="sum-action" class="font-bold">0</span></span>
-                <span class="px-2 py-0.5 bg-emerald-700 text-white rounded">Complete <span id="sum-complete" class="font-bold">0</span></span>
+                <span class="px-2 py-0.5 bg-green-700 text-white rounded">Running <span id="sum-running"
+                        class="font-bold">0</span></span>
+                <span class="px-2 py-0.5 bg-yellow-700 text-white rounded">Action <span id="sum-action"
+                        class="font-bold">0</span></span>
+                <span class="px-2 py-0.5 bg-emerald-700 text-white rounded">Complete <span id="sum-complete"
+                        class="font-bold">0</span></span>
             </div>
         </div>
     </nav>
@@ -116,11 +131,20 @@
                 <h2 class="text-xl font-semibold text-gray-300">Projects & Workspaces</h2>
                 <div class="flex gap-1 items-center">
                     <div class="inline-flex rounded-md shadow-sm mr-2" role="group">
-                        <button id="btn-view-list" onclick="setSidebarLayout('list')" class="px-2.5 py-1 bg-blue-600 text-white rounded-l text-xs font-semibold focus:outline-none transition">List</button>
-                        <button id="btn-view-grid" onclick="setSidebarLayout('grid')" class="px-2.5 py-1 bg-gray-700 hover:bg-gray-650 text-gray-300 rounded-r text-xs font-semibold focus:outline-none transition">Grid</button>
+                        <button id="btn-view-list" onclick="setSidebarLayout('list')"
+                            class="px-2.5 py-1 bg-blue-600 text-white rounded-l text-xs font-semibold focus:outline-none transition">List</button>
+                        <button id="btn-view-grid" onclick="setSidebarLayout('grid')"
+                            class="px-2.5 py-1 bg-gray-700 hover:bg-gray-650 text-gray-300 rounded-r text-xs font-semibold focus:outline-none transition">Grid</button>
                     </div>
-                    <button onclick="showInitModal()" class="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm transition">+ Init</button>
-                    <button onclick="showTrackModal()" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm transition">+ Track</button>
+                    <button onclick="showInitModal()"
+                        class="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm transition">+
+                        Init</button>
+                    <button onclick="showParallelModal()"
+                        class="px-2 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded text-sm transition">+
+                        Parallel</button>
+                    <button onclick="showTrackModal()"
+                        class="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm transition">+
+                        Track</button>
                 </div>
             </div>
             <div id="project-list" class="space-y-4">
@@ -132,19 +156,26 @@
         <!-- Main Content -->
         <div class="w-2/3" id="main-content" style="display: none;">
             <!-- Yellow Banner for Human Required -->
-            <div id="human-required-banner" class="bg-yellow-600 border-l-4 border-yellow-400 p-4 mb-6 rounded-lg text-white" style="display:none;">
+            <div id="human-required-banner"
+                class="bg-yellow-600 border-l-4 border-yellow-400 p-4 mb-6 rounded-lg text-white" style="display:none;">
                 <div class="flex justify-between items-start">
                     <div class="flex-1">
                         <div class="flex items-center gap-2">
                             <span class="text-xl font-bold">⚠️ Action Needed (Human Required)</span>
-                            <span id="human-reason" class="text-sm bg-yellow-850 px-2 py-0.5 rounded font-mono font-semibold"></span>
+                            <span id="human-reason"
+                                class="text-sm bg-yellow-850 px-2 py-0.5 rounded font-mono font-semibold"></span>
                         </div>
                         <p class="text-sm mt-2 font-semibold">Excerpt from loop.log:</p>
-                        <pre id="human-log-excerpt" class="mt-1 p-2 bg-yellow-900 bg-opacity-50 rounded text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-40"></pre>
+                        <pre id="human-log-excerpt"
+                            class="mt-1 p-2 bg-yellow-900 bg-opacity-50 rounded text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-40"></pre>
                     </div>
                     <div class="ml-4 flex flex-col gap-2">
-                        <button onclick="resumeProject()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-semibold text-sm shadow transition">I've handled it — Resume</button>
-                        <button onclick="switchTab('logs')" class="px-4 py-2 bg-gray-700 hover:bg-gray-650 text-white rounded font-semibold text-sm transition">Open loop.log</button>
+                        <button onclick="resumeProject()"
+                            class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-semibold text-sm shadow transition">I've
+                            handled it — Resume</button>
+                        <button onclick="switchTab('logs')"
+                            class="px-4 py-2 bg-gray-700 hover:bg-gray-650 text-white rounded font-semibold text-sm transition">Open
+                            loop.log</button>
                     </div>
                 </div>
             </div>
@@ -155,28 +186,41 @@
                         <div class="flex items-center gap-3">
                             <h2 class="text-2xl font-bold text-white" id="ws-title">Repo / Workspace</h2>
                             <span id="ws-status-badge" class="px-2 py-0.5 rounded text-xs font-semibold"></span>
-                            <span id="ws-stale-badge" class="px-2 py-0.5 bg-yellow-600 text-white rounded text-xs font-bold" style="display:none;">⚠️ Stale Lock</span>
-                            <span id="ws-running-info" class="text-xs text-gray-300 font-mono" style="display:none;"></span>
+                            <span id="ws-stale-badge"
+                                class="px-2 py-0.5 bg-yellow-600 text-white rounded text-xs font-bold"
+                                style="display:none;">⚠️ Stale Lock</span>
+                            <span id="ws-running-info" class="text-xs text-gray-300 font-mono"
+                                style="display:none;"></span>
                         </div>
                         <div class="text-sm text-gray-400 mt-1 flex items-center gap-3">
                             <span id="ws-path">/path/to/repo</span>
-                            <button onclick="viewDoc('REQUIREMENTS.md')" class="px-2 py-0.5 bg-gray-700 hover:bg-gray-650 text-gray-300 rounded text-xs transition font-semibold">📋 View REQUIREMENTS.md</button>
+                            <button onclick="viewDoc('REQUIREMENTS.md')"
+                                class="px-2 py-0.5 bg-gray-700 hover:bg-gray-650 text-gray-300 rounded text-xs transition font-semibold">📋
+                                View REQUIREMENTS.md</button>
                         </div>
                     </div>
                     <div class="space-x-2 flex items-center">
-                        <button id="btn-clear-lock" onclick="clearLock()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded font-medium transition" style="display:none;">Clear Lock</button>
-                        
+                        <button id="btn-clear-lock" onclick="clearLock()"
+                            class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded font-medium transition"
+                            style="display:none;">Clear Lock</button>
+                        <button onclick="runPreflight()"
+                            class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded font-medium transition">Check</button>
+
                         <div id="start-actions-group" class="flex gap-1">
-                            <select id="start-mode-select" class="bg-gray-700 text-white rounded px-2 py-2 text-sm focus:outline-none focus:border-blue-500 border border-gray-650">
+                            <select id="start-mode-select"
+                                class="bg-gray-700 text-white rounded px-2 py-2 text-sm focus:outline-none focus:border-blue-500 border border-gray-650">
                                 <option value="auto|all" selected>Start (Auto)</option>
                                 <option value="gated|all">Start (Gated)</option>
                                 <option value="gated|plan">Plan only</option>
                                 <option value="gated|execute">Execute only</option>
                             </select>
-                            <button id="btn-start" onclick="startProject()" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded font-medium transition">Start</button>
+                            <button id="btn-start" onclick="startProject()"
+                                class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded font-medium transition">Start</button>
                         </div>
 
-                        <button id="btn-stop" onclick="stopProject()" class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded font-medium transition" style="display:none;">Force Stop</button>
+                        <button id="btn-stop" onclick="stopProject()"
+                            class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded font-medium transition"
+                            style="display:none;">Force Stop</button>
                     </div>
                 </div>
 
@@ -199,16 +243,33 @@
             <!-- Tabs -->
             <div class="border-b border-gray-700 mb-4">
                 <nav class="-mb-px flex space-x-8">
-                    <button onclick="switchTab('overview')" id="tab-overview" class="border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Overview / 狀態</button>
-                    <button onclick="switchTab('logs')" id="tab-logs" class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Live Logs</button>
-                    <button onclick="switchTab('changes')" id="tab-changes" class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Changes</button>
-                    <button onclick="switchTab('config')" id="tab-config" class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">loop.config.yaml</button>
-                    <button onclick="switchTab('tree')" id="tab-tree" class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm" style="display: none;">Planning Tree</button>
+                    <button onclick="switchTab('overview')" id="tab-overview"
+                        class="border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Overview
+                        / 狀態</button>
+                    <button onclick="switchTab('logs')" id="tab-logs"
+                        class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Live
+                        Logs</button>
+                    <button onclick="switchTab('changes')" id="tab-changes"
+                        class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">Changes</button>
+                    <button onclick="switchTab('config')" id="tab-config"
+                        class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm">loop.config.yaml</button>
+                    <button onclick="switchTab('tree')" id="tab-tree"
+                        class="border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm"
+                        style="display: none;">Planning Tree</button>
                 </nav>
             </div>
 
             <!-- Tab Content: Overview -->
             <div id="content-overview" style="display: none;" class="space-y-6">
+                <div id="preflight-panel" class="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-sm"
+                    style="display:none;">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-lg font-bold text-gray-300">Preflight Check</h3>
+                        <span id="preflight-summary" class="px-2 py-0.5 rounded text-xs font-semibold"></span>
+                    </div>
+                    <div id="preflight-list" class="space-y-2 text-sm"></div>
+                </div>
+
                 <!-- Metadata grid -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div class="bg-gray-700 p-4 rounded shadow-sm">
@@ -237,7 +298,7 @@
                     <div class="bg-gray-700 p-4 rounded shadow-sm">
                         <span class="text-xs text-gray-400 uppercase font-semibold">Last Round Info</span>
                         <div class="text-sm text-gray-200 mt-1 font-mono">
-                            Mode: <span id="ctrl-last-mode" class="text-white font-semibold"></span> | 
+                            Mode: <span id="ctrl-last-mode" class="text-white font-semibold"></span> |
                             Result: <span id="ctrl-last-result" class="text-white font-semibold"></span>
                         </div>
                     </div>
@@ -282,7 +343,8 @@
                     <h3 class="text-lg font-bold text-gray-300 mb-4 flex items-center gap-2">
                         <span>Timeline / 活動時間軸</span>
                     </h3>
-                    <div id="activity-timeline" class="relative pl-6 border-l-2 border-gray-700 space-y-4 max-h-96 overflow-y-auto">
+                    <div id="activity-timeline"
+                        class="relative pl-6 border-l-2 border-gray-700 space-y-4 max-h-96 overflow-y-auto">
                         <div class="text-gray-500 text-sm">No activity events found in loop.log.</div>
                     </div>
                 </div>
@@ -292,12 +354,15 @@
             <div id="content-changes" style="display: none;" class="space-y-4">
                 <div class="flex justify-between items-center bg-gray-750 p-3 rounded-lg border border-gray-700">
                     <div class="text-xs text-gray-400 font-mono">
-                        Base SHA: <span id="diff-base" class="text-white font-semibold"></span> &nbsp;|&nbsp; 
+                        Base SHA: <span id="diff-base" class="text-white font-semibold"></span> &nbsp;|&nbsp;
                         HEAD SHA: <span id="diff-head" class="text-white font-semibold"></span>
                     </div>
-                    <button onclick="loadDiffData()" class="px-3 py-1 bg-gray-700 hover:bg-gray-650 text-white rounded text-xs font-semibold transition">🔄 Refresh</button>
+                    <button onclick="loadDiffData()"
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-650 text-white rounded text-xs font-semibold transition">🔄
+                        Refresh</button>
                 </div>
-                <div id="diff-window" class="p-4 bg-gray-900 border border-gray-700 rounded-lg overflow-x-auto text-xs font-mono whitespace-pre max-h-[600px] text-gray-300">
+                <div id="diff-window"
+                    class="p-4 bg-gray-900 border border-gray-700 rounded-lg overflow-x-auto text-xs font-mono whitespace-pre max-h-[600px] text-gray-300">
                     <!-- Diff populated dynamically -->
                 </div>
             </div>
@@ -305,20 +370,87 @@
             <!-- Tab Content: Logs -->
             <div id="content-logs">
                 <div class="flex items-center gap-2 mb-2 flex-wrap">
-                    <button onclick="switchLog('loop')" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">loop.log</button>
-                    <button onclick="switchLog('plan')" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">plan.log</button>
-                    <span id="current-log-label" class="ml-2 py-1 text-sm text-blue-400 font-mono">Viewing: loop.log</span>
-                    <input type="text" id="log-filter" oninput="applyLogFilter()" placeholder="Filter lines…" class="ml-auto bg-gray-900 text-gray-200 text-sm px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-blue-500">
-                    <button onclick="downloadLog()" class="px-3 py-1 bg-blue-700 hover:bg-blue-600 rounded text-sm">Download</button>
+                    <button onclick="switchLog('loop')"
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">loop.log</button>
+                    <button onclick="switchLog('plan')"
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">plan.log</button>
+                    <span id="current-log-label" class="ml-2 py-1 text-sm text-blue-400 font-mono">Viewing:
+                        loop.log</span>
+                    <input type="text" id="log-filter" oninput="applyLogFilter()" placeholder="Filter lines…"
+                        class="ml-auto bg-gray-900 text-gray-200 text-sm px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-blue-500">
+                    <button onclick="downloadLog()"
+                        class="px-3 py-1 bg-blue-700 hover:bg-blue-600 rounded text-sm">Download</button>
                 </div>
                 <div id="log-window" class="log-window"></div>
             </div>
 
             <!-- Tab Content: Config -->
             <div id="content-config" style="display: none;">
-                <textarea id="config-editor" class="w-full h-96 bg-gray-900 text-gray-300 p-4 font-mono text-sm border border-gray-700 rounded focus:outline-none focus:border-blue-500"></textarea>
+                <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
+                    <h3 class="text-lg font-bold text-gray-300 mb-3">Config Setup Wizard</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">CLI Preset</label>
+                            <select id="wizard-preset" onchange="applyWizardPreset()"
+                                class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600">
+                                <option value="custom">Custom</option>
+                                <option value="opencode">opencode</option>
+                                <option value="codex">Codex CLI</option>
+                                <option value="claude">Claude Code</option>
+                                <option value="gemini">Gemini CLI</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Generation Mode</label>
+                            <select id="wizard-mode"
+                                class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600">
+                                <option value="gated">gated</option>
+                                <option value="auto">auto</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="block text-xs text-gray-400 mb-1">agent.build_cmd</label>
+                            <input id="wizard-build-cmd"
+                                class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600 font-mono text-sm"
+                                placeholder="opencode run -m {model} {prompt}">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">fast model</label>
+                            <input id="wizard-fast-model"
+                                class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                                placeholder="fast model">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">normal model</label>
+                            <input id="wizard-normal-model"
+                                class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                                placeholder="normal model">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">thinking model</label>
+                            <input id="wizard-thinking-model"
+                                class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                                placeholder="thinking model">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">extra_args JSON</label>
+                            <input id="wizard-extra-args"
+                                class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600 font-mono text-sm"
+                                placeholder='[]'>
+                        </div>
+                    </div>
+                    <div class="mt-3 flex justify-end">
+                        <button onclick="applyConfigWizard()"
+                            class="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded font-medium transition">Apply
+                            Wizard</button>
+                    </div>
+                </div>
+                <textarea id="config-editor"
+                    class="w-full h-96 bg-gray-900 text-gray-300 p-4 font-mono text-sm border border-gray-700 rounded focus:outline-none focus:border-blue-500"></textarea>
                 <div class="mt-4 flex justify-end">
-                    <button onclick="saveConfig()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition">Save Config</button>
+                    <button onclick="saveConfig()"
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition">Save
+                        Config</button>
                 </div>
             </div>
 
@@ -326,26 +458,42 @@
             <div id="content-tree" style="display: none;">
                 <div class="flex gap-4">
                     <!-- Left: Tree Graph -->
-                    <div class="w-2/3 bg-gray-900 p-4 rounded-lg border border-gray-700 overflow-auto" style="min-height: 400px; max-height: 600px;">
+                    <div class="w-2/3 bg-gray-900 p-4 rounded-lg border border-gray-700 overflow-auto"
+                        style="min-height: 400px; max-height: 600px;">
                         <div id="tree-container" class="tree-horiz"></div>
                     </div>
                     <!-- Right: Node Details Pane -->
-                    <div class="w-1/3 bg-gray-800 p-4 rounded-lg border border-gray-700 flex flex-col justify-between" style="min-height: 400px;">
+                    <div class="w-1/3 bg-gray-800 p-4 rounded-lg border border-gray-700 flex flex-col justify-between"
+                        style="min-height: 400px;">
                         <div>
-                            <h3 class="text-lg font-bold text-blue-400 border-b border-gray-700 pb-2 mb-4">Node Details</h3>
-                            <div id="node-details-empty" class="text-gray-500">Select a node in the tree to view its details.</div>
+                            <h3 class="text-lg font-bold text-blue-400 border-b border-gray-700 pb-2 mb-4">Node Details
+                            </h3>
+                            <div id="node-details-empty" class="text-gray-500">Select a node in the tree to view its
+                                details.</div>
                             <div id="node-details-content" style="display: none;" class="space-y-3 text-sm">
-                                <div><span class="text-gray-400 font-semibold">Node ID:</span> <span id="nd-id" class="text-white font-mono"></span></div>
-                                <div><span class="text-gray-400 font-semibold">Description:</span> <p id="nd-desc" class="text-gray-200 mt-1"></p></div>
-                                <div><span class="text-gray-400 font-semibold">State:</span> <span id="nd-state" class="px-2 py-0.5 rounded font-mono text-xs"></span></div>
-                                <div><span class="text-gray-400 font-semibold">Depth:</span> <span id="nd-depth" class="text-gray-200"></span></div>
-                                <div><span class="text-gray-400 font-semibold">Stable Rounds:</span> <span id="nd-stable" class="text-gray-200"></span></div>
-                                <div><span class="text-gray-400 font-semibold">Reflow Count:</span> <span id="nd-reflow" class="text-gray-200"></span></div>
+                                <div><span class="text-gray-400 font-semibold">Node ID:</span> <span id="nd-id"
+                                        class="text-white font-mono"></span></div>
+                                <div><span class="text-gray-400 font-semibold">Description:</span>
+                                    <p id="nd-desc" class="text-gray-200 mt-1"></p>
+                                </div>
+                                <div><span class="text-gray-400 font-semibold">State:</span> <span id="nd-state"
+                                        class="px-2 py-0.5 rounded font-mono text-xs"></span></div>
+                                <div><span class="text-gray-400 font-semibold">Depth:</span> <span id="nd-depth"
+                                        class="text-gray-200"></span></div>
+                                <div><span class="text-gray-400 font-semibold">Stable Rounds:</span> <span
+                                        id="nd-stable" class="text-gray-200"></span></div>
+                                <div><span class="text-gray-400 font-semibold">Reflow Count:</span> <span id="nd-reflow"
+                                        class="text-gray-200"></span></div>
                             </div>
                         </div>
-                        <div id="node-details-actions" style="display: none;" class="pt-4 border-t border-gray-700 flex flex-col gap-2">
-                            <button id="btn-view-spec" onclick="viewNodeSpec()" class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition">View Spec</button>
-                            <button id="btn-reject" onclick="rejectSubtree()" class="w-full px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded font-medium transition">Reject & Replan Subtree</button>
+                        <div id="node-details-actions" style="display: none;"
+                            class="pt-4 border-t border-gray-700 flex flex-col gap-2">
+                            <button id="btn-view-spec" onclick="viewNodeSpec()"
+                                class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition">View
+                                Spec</button>
+                            <button id="btn-reject" onclick="rejectSubtree()"
+                                class="w-full px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded font-medium transition">Reject
+                                & Replan Subtree</button>
                         </div>
                     </div>
                 </div>
@@ -354,53 +502,117 @@
     </div>
 
     <!-- Doc View Modal -->
-    <div id="doc-modal" class="fixed inset-0 bg-black bg-opacity-65 flex items-center justify-center" style="display: none; z-index: 100;">
+    <div id="doc-modal" class="fixed inset-0 bg-black bg-opacity-65 flex items-center justify-center"
+        style="display: none; z-index: 100;">
         <div class="bg-gray-800 p-6 rounded-lg w-2/3 border border-gray-700 max-h-[80vh] flex flex-col">
             <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
                 <h2 class="text-xl font-bold text-white flex items-center gap-2">
                     <span>📄 Document Viewer:</span>
                     <span id="doc-modal-title" class="text-sm font-mono text-gray-400 font-normal"></span>
                 </h2>
-                <button onclick="hideDocModal()" class="text-gray-450 hover:text-white font-bold text-lg px-2 py-1 rounded hover:bg-gray-750 transition">✕</button>
+                <button onclick="hideDocModal()"
+                    class="text-gray-450 hover:text-white font-bold text-lg px-2 py-1 rounded hover:bg-gray-750 transition">✕</button>
             </div>
-            <div class="flex-1 overflow-auto bg-gray-900 border border-gray-750 p-4 rounded-lg text-sm text-gray-305 font-mono whitespace-pre-wrap text-left" id="doc-modal-content">
+            <div class="flex-1 overflow-auto bg-gray-900 border border-gray-750 p-4 rounded-lg text-sm text-gray-305 font-mono whitespace-pre-wrap text-left"
+                id="doc-modal-content">
                 <!-- Content populated dynamically -->
             </div>
         </div>
     </div>
-    <div id="init-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style="display: none;">
+    <div id="init-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+        style="display: none;">
         <div class="bg-gray-800 p-6 rounded-lg w-1/3 border border-gray-700">
             <h2 class="text-xl font-bold text-white mb-4">Init New Workspace</h2>
             <div class="mb-4">
                 <label class="block text-sm text-gray-400 mb-1">Absolute Path to Code Repo</label>
-                <input type="text" id="init-repo" class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600" placeholder="e.g. C:/Users/yuting/IdeaProjects/my-app">
+                <input type="text" id="init-repo"
+                    class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                    placeholder="e.g. C:/Users/yuting/IdeaProjects/my-app">
             </div>
             <div class="mb-6">
                 <label class="block text-sm text-gray-400 mb-1">Workspace Name</label>
-                <input type="text" id="init-ws" class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600" placeholder="e.g. default">
+                <input type="text" id="init-ws" class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                    placeholder="e.g. default">
             </div>
             <div class="flex justify-end space-x-2">
-                <button onclick="hideInitModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded">Cancel</button>
-                <button onclick="submitInit()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded">Initialize</button>
+                <button onclick="hideInitModal()"
+                    class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded">Cancel</button>
+                <button onclick="submitInit()"
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded">Initialize</button>
             </div>
         </div>
     </div>
 
     <!-- Track Modal -->
-    <div id="track-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style="display: none;">
+    <div id="track-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+        style="display: none;">
         <div class="bg-gray-800 p-6 rounded-lg w-1/3 border border-gray-700">
             <h2 class="text-xl font-bold text-white mb-4">Track Existing Workspace</h2>
             <div class="mb-4">
                 <label class="block text-sm text-gray-400 mb-1">Absolute Path to Code Repo</label>
-                <input type="text" id="track-repo" class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600" placeholder="e.g. /Users/yuting/IdeaProjects/my-app">
+                <input type="text" id="track-repo"
+                    class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                    placeholder="e.g. /Users/yuting/IdeaProjects/my-app">
             </div>
             <div class="mb-6">
                 <label class="block text-sm text-gray-400 mb-1">Workspace Name</label>
-                <input type="text" id="track-ws" class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600" placeholder="e.g. default">
+                <input type="text" id="track-ws"
+                    class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600" placeholder="e.g. default">
             </div>
             <div class="flex justify-end space-x-2">
-                <button onclick="hideTrackModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded">Cancel</button>
-                <button onclick="submitTrack()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded">Track</button>
+                <button onclick="hideTrackModal()"
+                    class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded">Cancel</button>
+                <button onclick="submitTrack()"
+                    class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded">Track</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Parallel Worktree Modal -->
+    <div id="parallel-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+        style="display: none;">
+        <div class="bg-gray-800 p-6 rounded-lg w-1/2 border border-gray-700">
+            <h2 class="text-xl font-bold text-white mb-4">Create Parallel Worktree</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="md:col-span-2">
+                    <label class="block text-sm text-gray-400 mb-1">Main Repo Path</label>
+                    <input type="text" id="parallel-repo"
+                        class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                        placeholder="e.g. C:/Users/yuting/IdeaProjects/my-app">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Branch</label>
+                    <input type="text" id="parallel-branch"
+                        class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                        placeholder="e.g. loop/feat-x">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Workspace Name</label>
+                    <input type="text" id="parallel-ws"
+                        class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                        placeholder="defaults to sanitized branch">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Target Path (optional)</label>
+                    <input type="text" id="parallel-path"
+                        class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                        placeholder="defaults to sibling directory">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Base Ref (optional)</label>
+                    <input type="text" id="parallel-base"
+                        class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600"
+                        placeholder="defaults to HEAD">
+                </div>
+            </div>
+            <div id="parallel-output"
+                class="mt-4 bg-gray-900 border border-gray-700 rounded p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap max-h-40 overflow-auto"
+                style="display:none;"></div>
+            <div class="flex justify-end space-x-2 mt-6">
+                <button onclick="hideParallelModal()"
+                    class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded">Cancel</button>
+                <button id="btn-submit-parallel" onclick="submitParallel()"
+                    class="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded">Create & Track</button>
             </div>
         </div>
     </div>
@@ -518,8 +730,8 @@
                         title = `⚠️ Action Needed: ${current.repo_name}/${current.workspace}`;
                         body = `Project requires human intervention.`;
                     }
-                    else if ((current.status === 'complete' || current.status === 'done') && 
-                             (prev.status !== 'complete' && prev.status !== 'done')) {
+                    else if ((current.status === 'complete' || current.status === 'done') &&
+                        (prev.status !== 'complete' && prev.status !== 'done')) {
                         triggerNotify = true;
                         title = `✅ Complete: ${current.repo_name}/${current.workspace}`;
                         body = `Project has finished execution successfully.`;
@@ -564,15 +776,15 @@
         async function submitInit() {
             const repo = document.getElementById('init-repo').value;
             const ws = document.getElementById('init-ws').value || 'default';
-            if(!repo) return alert("Repository path is required");
+            if (!repo) return alert("Repository path is required");
 
             const res = await fetch('/api/projects/init', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({repo_path: repo, workspace_name: ws})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ repo_path: repo, workspace_name: ws })
             });
 
-            if(res.ok) {
+            if (res.ok) {
                 hideInitModal();
                 fetchProjects();
                 alert(`Workspace ${ws} initialized in ${repo}!`);
@@ -593,21 +805,76 @@
         async function submitTrack() {
             const repo = document.getElementById('track-repo').value;
             const ws = document.getElementById('track-ws').value || 'default';
-            if(!repo) return alert("Repository path is required");
+            if (!repo) return alert("Repository path is required");
 
             const res = await fetch('/api/projects/add', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({repo_path: repo, workspace_name: ws})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ repo_path: repo, workspace_name: ws })
             });
 
-            if(res.ok) {
+            if (res.ok) {
                 hideTrackModal();
                 fetchProjects();
                 alert(`Workspace ${ws} in ${repo} successfully added to dashboard tracking!`);
             } else {
                 const err = await res.json();
                 alert("Failed to track workspace: " + err.detail);
+            }
+        }
+
+        function showParallelModal() {
+            document.getElementById('parallel-modal').style.display = 'flex';
+            const currentPath = document.getElementById('ws-path')?.innerText;
+            if (currentPath && currentPath !== '/path/to/repo') {
+                document.getElementById('parallel-repo').value = currentPath;
+            }
+        }
+
+        function hideParallelModal() {
+            document.getElementById('parallel-modal').style.display = 'none';
+        }
+
+        async function submitParallel() {
+            const repo = document.getElementById('parallel-repo').value.trim();
+            const branch = document.getElementById('parallel-branch').value.trim();
+            const ws = document.getElementById('parallel-ws').value.trim();
+            const targetPath = document.getElementById('parallel-path').value.trim();
+            const baseRef = document.getElementById('parallel-base').value.trim();
+            if (!repo || !branch) return alert("Repository path and branch are required");
+
+            const btn = document.getElementById('btn-submit-parallel');
+            const output = document.getElementById('parallel-output');
+            btn.disabled = true;
+            btn.innerText = "Creating...";
+            output.style.display = 'block';
+            output.innerText = "Running parallel.py add...";
+
+            const res = await fetch('/api/parallel/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    repo_path: repo,
+                    branch: branch,
+                    workspace_name: ws || null,
+                    target_path: targetPath || null,
+                    base_ref: baseRef || null
+                })
+            });
+
+            btn.disabled = false;
+            btn.innerText = "Create & Track";
+
+            if (res.ok) {
+                const data = await res.json();
+                output.innerText = data.output || `Created ${data.repo_path} / ${data.workspace}`;
+                await fetchProjects();
+                alert(`Parallel worktree created and tracked:\n${data.repo_path}\nworkspace: ${data.workspace}`);
+                hideParallelModal();
+            } else {
+                const err = await res.json();
+                output.innerText = err.detail || "Failed to create worktree";
+                alert("Failed to create parallel worktree: " + (err.detail || "unknown error"));
             }
         }
 
@@ -667,7 +934,7 @@
                 } else if (p.status === 'FAIL') {
                     badgeClass = 'bg-red-600 text-white';
                 }
-                
+
                 let staleBadge = '';
                 if (p.stale_lock && !isRunning) {
                     staleBadge = `<span class="ml-2 px-1.5 py-0.5 bg-yellow-600 text-white rounded text-[10px] font-bold">⚠️ Stale Lock</span>`;
@@ -704,7 +971,7 @@
                 const card = document.createElement('div');
                 card.className = `p-4 bg-gray-800 rounded-lg cursor-pointer border hover:border-blue-500 transition ${currentProjectId === p.id ? 'border-blue-500 bg-gray-750' : 'border-gray-700'}`;
                 card.onclick = () => selectProject(p);
-                
+
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <div>
@@ -734,7 +1001,7 @@
             document.getElementById('ws-phase').innerText = p.phase;
             document.getElementById('ws-stuck').innerText = p.stuck;
             document.getElementById('ws-status').innerText = p.status;
-            
+
             const isRunning = p.is_running;
             let badgeClass = 'bg-gray-600 text-gray-200';
             let statusLabel = p.status;
@@ -750,11 +1017,11 @@
             } else if (p.status === 'FAIL') {
                 badgeClass = 'bg-red-600 text-white';
             }
-            
+
             const wsBadge = document.getElementById('ws-status-badge');
             wsBadge.innerText = statusLabel;
             wsBadge.className = `px-2 py-0.5 rounded text-xs font-semibold ${badgeClass}`;
-            
+
             if (p.is_running) {
                 document.getElementById('start-actions-group').style.display = 'none';
                 document.getElementById('btn-stop').style.display = 'inline-block';
@@ -842,7 +1109,7 @@
 
             // Load Config
             const res = await fetch(`/api/projects/${p.id}/config`);
-            if(res.ok) {
+            if (res.ok) {
                 const data = await res.json();
                 document.getElementById('config-editor').value = data.content;
             } else {
@@ -860,15 +1127,15 @@
             const res = await fetch(`/api/projects/${projId}/tree`);
             if (!res.ok) return;
             const data = await res.json();
-            
+
             const treeContainer = document.getElementById('tree-container');
             treeContainer.innerHTML = '';
-            
+
             const tabTree = document.getElementById('tab-tree');
             if (data.tree_enabled) {
                 tabTree.style.display = 'inline-block';
                 currentTreeNodes = data.nodes;
-                
+
                 const rootNode = data.nodes.find(n => n.id === data.root);
                 if (rootNode) {
                     const treeRootUl = document.createElement('ul');
@@ -887,7 +1154,7 @@
 
         function renderTreeNode(node) {
             const li = document.createElement('li');
-            
+
             let borderClass = 'border-gray-700';
             switch (node.state) {
                 case 'PENDING':
@@ -911,14 +1178,14 @@
                 default:
                     borderClass = 'border-teal-500 text-teal-400 hover:border-teal-400';
             }
-            
+
             const nodeDiv = document.createElement('div');
             nodeDiv.className = `node-card ${borderClass} ${selectedNodeId === node.id ? 'selected bg-gray-850' : ''}`;
             nodeDiv.onclick = (e) => {
                 e.stopPropagation();
                 selectTreeNode(node.id);
             };
-            
+
             nodeDiv.innerHTML = `
                 <div class="font-bold font-mono text-sm text-white">${node.id}</div>
                 <div class="text-xs text-gray-400 truncate max-w-[180px] mt-1">${node.description || ''}</div>
@@ -927,9 +1194,9 @@
                     <span class="font-semibold uppercase tracking-wider">${node.state}</span>
                 </div>
             `;
-            
+
             li.appendChild(nodeDiv);
-            
+
             if (node.children && node.children.length > 0) {
                 const ul = document.createElement('ul');
                 node.children.forEach(childId => {
@@ -940,33 +1207,33 @@
                 });
                 li.appendChild(ul);
             }
-            
+
             return li;
         }
 
         function selectTreeNode(nodeId) {
             selectedNodeId = nodeId;
-            
+
             document.querySelectorAll('.node-card').forEach(el => {
                 el.classList.remove('selected');
             });
-            
+
             const node = currentTreeNodes.find(n => n.id === nodeId);
             if (!node) return;
-            
+
             document.getElementById('node-details-empty').style.display = 'none';
             document.getElementById('node-details-content').style.display = 'block';
             document.getElementById('node-details-actions').style.display = 'block';
-            
+
             document.getElementById('nd-id').innerText = node.id;
             document.getElementById('nd-desc').innerText = node.description || '(No description)';
             document.getElementById('nd-depth').innerText = node.depth;
             document.getElementById('nd-stable').innerText = node.stable_rounds;
             document.getElementById('nd-reflow').innerText = node.reflow_count;
-            
+
             const stateSpan = document.getElementById('nd-state');
             stateSpan.innerText = node.state;
-            
+
             let stateClass = 'bg-gray-700 text-gray-300';
             switch (node.state) {
                 case 'PENDING': stateClass = 'bg-gray-700 text-gray-300'; break;
@@ -978,7 +1245,7 @@
                 default: stateClass = 'bg-teal-600 text-white';
             }
             stateSpan.className = `px-2 py-0.5 rounded font-mono text-xs ${stateClass}`;
-            
+
             document.querySelectorAll('.node-card').forEach(card => {
                 if (card.querySelector('.font-mono').innerText === nodeId) {
                     card.classList.add('selected');
@@ -990,26 +1257,26 @@
             if (!currentProjectId || !selectedNodeId) return;
             const confirmReject = confirm(`Are you sure you want to reject subtree [${selectedNodeId}]?\nThis will revert this subtree and all its children back to PENDING and start replanning.`);
             if (!confirmReject) return;
-            
+
             const btnReject = document.getElementById('btn-reject');
             btnReject.innerText = "Rejecting...";
             btnReject.disabled = true;
-            
+
             const res = await fetch(`/api/projects/${currentProjectId}/reject`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({subtree_id: selectedNodeId})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subtree_id: selectedNodeId })
             });
-            
+
             btnReject.innerText = "Reject & Replan Subtree";
             btnReject.disabled = false;
-            
+
             if (res.ok) {
                 alert(`Subtree [${selectedNodeId}] rejected successfully. Re-planning started in the background.`);
                 switchTab('logs');
                 fetchProjects().then(() => {
                     const p = document.getElementById('ws-title').innerText;
-                    selectProject({id: currentProjectId, repo_name: p.split('/')[0].trim(), workspace: p.split('/')[1].trim(), phase: '-', stuck: '-', status: '-', is_running: false, repo: document.getElementById('ws-path').innerText});
+                    selectProject({ id: currentProjectId, repo_name: p.split('/')[0].trim(), workspace: p.split('/')[1].trim(), phase: '-', stuck: '-', status: '-', is_running: false, repo: document.getElementById('ws-path').innerText });
                 });
             } else {
                 const err = await res.json();
@@ -1066,24 +1333,24 @@
         }
 
         async function resumeProject() {
-            if(!currentProjectId) return;
+            if (!currentProjectId) return;
             const banner = document.getElementById('human-required-banner');
             const btnResume = banner.querySelector('button');
             const originalText = btnResume.innerText;
             btnResume.innerText = "Resuming...";
             btnResume.disabled = true;
 
-            const res = await fetch(`/api/projects/${currentProjectId}/resume`, {method: 'POST'});
-            
+            const res = await fetch(`/api/projects/${currentProjectId}/resume`, { method: 'POST' });
+
             btnResume.innerText = originalText;
             btnResume.disabled = false;
 
-            if(res.ok) {
+            if (res.ok) {
                 alert("Project resumed successfully!");
                 fetchProjects().then(() => {
                     fetch('/api/projects').then(r => r.json()).then(projects => {
                         const p = projects.find(x => x.id === currentProjectId);
-                        if(p) selectProject(p);
+                        if (p) selectProject(p);
                     });
                 });
             } else {
@@ -1097,7 +1364,7 @@
                 const res = await fetch(`/api/projects/${projId}/control`);
                 if (!res.ok) return;
                 const data = await res.json();
-                
+
                 document.getElementById('ctrl-model-tier').innerText = data.current_model_tier || 'N/A';
                 document.getElementById('ctrl-blocking-issues').innerText = data.blocking_issues || '0';
                 document.getElementById('ctrl-enhanced-rounds').innerText = data.enhanced_rounds_used || '0';
@@ -1120,10 +1387,10 @@
                 document.getElementById('ctrl-plan-version').innerText = data.plan_version || '1';
                 document.getElementById('ctrl-last-mode').innerText = data.last_round_mode || 'N/A';
                 document.getElementById('ctrl-last-result').innerText = data.last_round_result || 'N/A';
-                
+
                 const tableBody = document.getElementById('phases-table-body');
                 tableBody.innerHTML = '';
-                
+
                 if (data.phases && data.phases.length > 0) {
                     data.phases.forEach(ph => {
                         let consecCell = '';
@@ -1167,16 +1434,16 @@
                 const res = await fetch(`/api/projects/${projId}/activity`);
                 if (!res.ok) return;
                 const events = await res.json();
-                
+
                 const container = document.getElementById('activity-timeline');
                 if (!container) return;
                 container.innerHTML = '';
-                
+
                 if (events.length === 0) {
                     container.innerHTML = '<div class="text-gray-500 text-sm">No activity events found in loop.log.</div>';
                     return;
                 }
-                
+
                 events.forEach(e => {
                     let dotColorClass = 'bg-gray-500';
                     if (e.type === 'complete') dotColorClass = 'bg-green-500';
@@ -1185,7 +1452,7 @@
                     else if (e.type === 'model_upgrade') dotColorClass = 'bg-blue-500';
                     else if (e.type === 'progress') dotColorClass = 'bg-teal-600';
                     else if (e.type === 'leaf_converged') dotColorClass = 'bg-cyan-500';
-                    
+
                     const item = document.createElement('div');
                     item.className = 'relative pl-2';
                     item.innerHTML = `
@@ -1256,13 +1523,13 @@
                 container.innerHTML = `<span class="text-gray-500">No changes since last safe point</span>`;
                 return;
             }
-            
+
             const lines = diffText.split('\n');
             const fragment = document.createDocumentFragment();
-            
+
             lines.forEach(line => {
                 const div = document.createElement('div');
-                
+
                 if (line.startsWith('+') && !line.startsWith('+++')) {
                     div.className = 'text-green-450 bg-green-950/20';
                     div.textContent = line;
@@ -1281,7 +1548,7 @@
                 }
                 fragment.appendChild(div);
             });
-            
+
             container.innerHTML = '';
             container.appendChild(fragment);
         }
@@ -1318,11 +1585,11 @@
             const titleSpan = document.getElementById('doc-modal-title');
             const contentDiv = document.getElementById('doc-modal-content');
             if (!modal || !titleSpan || !contentDiv) return;
-            
+
             titleSpan.innerText = path;
             contentDiv.innerHTML = '<span class="text-gray-500">Loading document...</span>';
             modal.style.display = 'flex';
-            
+
             try {
                 const res = await fetch(`/api/projects/${currentProjectId}/doc?path=${encodeURIComponent(path)}`);
                 if (!res.ok) {
@@ -1344,21 +1611,31 @@
         }
 
         async function startProject() {
-            if(!currentProjectId) return;
+            if (!currentProjectId) return;
             const modeSelect = document.getElementById('start-mode-select');
             const [mode, stage] = modeSelect.value.split('|');
+
+            const preflightRes = await fetch(`/api/projects/${currentProjectId}/preflight`);
+            if (preflightRes.ok) {
+                const preflight = await preflightRes.json();
+                if (!preflight.ok) {
+                    await runPreflight();
+                    const proceed = confirm("Preflight found items that need attention. Start anyway?");
+                    if (!proceed) return;
+                }
+            }
 
             document.getElementById('btn-start').innerText = "Starting...";
             const res = await fetch(`/api/projects/${currentProjectId}/start`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({mode: mode, stage: stage})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: mode, stage: stage })
             });
-            if(res.ok) {
+            if (res.ok) {
                 setTimeout(() => {
                     fetchProjects().then(() => {
                         const p = document.getElementById('ws-title').innerText;
-                        selectProject({id: currentProjectId, repo_name: p.split('/')[0].trim(), workspace: p.split('/')[1].trim(), phase: '-', stuck: '-', status: '-', is_running: true, repo: document.getElementById('ws-path').innerText});
+                        selectProject({ id: currentProjectId, repo_name: p.split('/')[0].trim(), workspace: p.split('/')[1].trim(), phase: '-', stuck: '-', status: '-', is_running: true, repo: document.getElementById('ws-path').innerText });
                     });
                 }, 1000);
             } else {
@@ -1369,14 +1646,14 @@
         }
 
         async function stopProject() {
-            if(!currentProjectId) return;
+            if (!currentProjectId) return;
             document.getElementById('btn-stop').innerText = "Stopping...";
-            const res = await fetch(`/api/projects/${currentProjectId}/stop`, {method: 'POST'});
-            if(res.ok) {
+            const res = await fetch(`/api/projects/${currentProjectId}/stop`, { method: 'POST' });
+            if (res.ok) {
                 setTimeout(() => {
                     fetchProjects().then(() => {
                         const p = document.getElementById('ws-title').innerText;
-                        selectProject({id: currentProjectId, repo_name: p.split('/')[0].trim(), workspace: p.split('/')[1].trim(), phase: '-', stuck: '-', status: '-', is_running: false, repo: document.getElementById('ws-path').innerText});
+                        selectProject({ id: currentProjectId, repo_name: p.split('/')[0].trim(), workspace: p.split('/')[1].trim(), phase: '-', stuck: '-', status: '-', is_running: false, repo: document.getElementById('ws-path').innerText });
                     });
                 }, 1000);
             } else {
@@ -1386,14 +1663,14 @@
         }
 
         async function clearLock() {
-            if(!currentProjectId) return;
-            const res = await fetch(`/api/projects/${currentProjectId}/clear-lock`, {method: 'POST'});
-            if(res.ok) {
+            if (!currentProjectId) return;
+            const res = await fetch(`/api/projects/${currentProjectId}/clear-lock`, { method: 'POST' });
+            if (res.ok) {
                 alert("Lock cleared successfully!");
                 fetchProjects().then(() => {
                     fetch('/api/projects').then(r => r.json()).then(projects => {
                         const p = projects.find(x => x.id === currentProjectId);
-                        if(p) selectProject(p);
+                        if (p) selectProject(p);
                     });
                 });
             } else {
@@ -1402,15 +1679,111 @@
             }
         }
 
+        async function runPreflight() {
+            if (!currentProjectId) return;
+            const panel = document.getElementById('preflight-panel');
+            const summary = document.getElementById('preflight-summary');
+            const list = document.getElementById('preflight-list');
+            panel.style.display = 'block';
+            summary.innerText = 'Checking...';
+            summary.className = 'px-2 py-0.5 rounded text-xs font-semibold bg-gray-600 text-white';
+            list.innerHTML = '<div class="text-gray-500">Running checks...</div>';
+
+            const res = await fetch(`/api/projects/${currentProjectId}/preflight`);
+            if (!res.ok) {
+                const err = await res.json();
+                summary.innerText = 'Failed';
+                summary.className = 'px-2 py-0.5 rounded text-xs font-semibold bg-red-600 text-white';
+                list.innerHTML = `<div class="text-red-400">${err.detail || 'Preflight failed'}</div>`;
+                return;
+            }
+
+            const data = await res.json();
+            summary.innerText = data.ok ? 'Ready' : 'Needs Attention';
+            summary.className = data.ok
+                ? 'px-2 py-0.5 rounded text-xs font-semibold bg-emerald-600 text-white'
+                : 'px-2 py-0.5 rounded text-xs font-semibold bg-yellow-600 text-white';
+            list.innerHTML = '';
+            data.checks.forEach(check => {
+                const row = document.createElement('div');
+                row.className = 'flex items-start justify-between gap-3 bg-gray-900 border border-gray-700 rounded p-2';
+                row.innerHTML = `
+                    <div>
+                        <div class="font-semibold ${check.ok ? 'text-emerald-400' : 'text-yellow-400'}">${check.ok ? '✓' : '!'} ${check.label}</div>
+                        <div class="text-xs text-gray-400 font-mono mt-0.5">${check.detail || ''}</div>
+                    </div>
+                    <span class="text-xs px-2 py-0.5 rounded ${check.ok ? 'bg-emerald-700 text-white' : 'bg-yellow-700 text-white'}">${check.ok ? 'OK' : 'Review'}</span>
+                `;
+                list.appendChild(row);
+            });
+        }
+
+        const wizardPresets = {
+            opencode: 'opencode run -m {model} {prompt}',
+            codex: 'codex exec --model {model} {prompt}',
+            claude: 'claude -p {prompt}',
+            gemini: 'gemini -m {model} -p {prompt}'
+        };
+
+        function applyWizardPreset() {
+            const preset = document.getElementById('wizard-preset').value;
+            if (wizardPresets[preset]) {
+                document.getElementById('wizard-build-cmd').value = wizardPresets[preset];
+            }
+        }
+
+        async function applyConfigWizard() {
+            if (!currentProjectId) return;
+            let extraArgs = [];
+            const rawExtra = document.getElementById('wizard-extra-args').value.trim();
+            if (rawExtra) {
+                try {
+                    extraArgs = JSON.parse(rawExtra);
+                    if (!Array.isArray(extraArgs)) throw new Error("extra_args must be a JSON array");
+                } catch (err) {
+                    alert("extra_args must be a JSON array, e.g. []");
+                    return;
+                }
+            }
+
+            const payload = {
+                build_cmd: document.getElementById('wizard-build-cmd').value,
+                fast_model: document.getElementById('wizard-fast-model').value,
+                normal_model: document.getElementById('wizard-normal-model').value,
+                thinking_model: document.getElementById('wizard-thinking-model').value,
+                mode: document.getElementById('wizard-mode').value,
+                extra_args: extraArgs
+            };
+
+            const res = await fetch(`/api/projects/${currentProjectId}/config-wizard`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                const cfg = await fetch(`/api/projects/${currentProjectId}/config`);
+                if (cfg.ok) {
+                    const data = await cfg.json();
+                    document.getElementById('config-editor').value = data.content;
+                }
+                alert("Config wizard applied.");
+                runPreflight();
+            } else {
+                const err = await res.json();
+                alert("Failed to apply config wizard: " + err.detail);
+            }
+        }
+
         async function saveConfig() {
-            if(!currentProjectId) return;
+            if (!currentProjectId) return;
             const content = document.getElementById('config-editor').value;
             const res = await fetch(`/api/projects/${currentProjectId}/config`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({content})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content })
             });
-            if(res.ok) {
+            if (res.ok) {
                 alert("Config Saved Successfully!");
             } else {
                 const err = await res.json();
@@ -1424,29 +1797,29 @@
             document.getElementById('content-changes').style.display = tab === 'changes' ? 'block' : 'none';
             document.getElementById('content-config').style.display = tab === 'config' ? 'block' : 'none';
             document.getElementById('content-tree').style.display = tab === 'tree' ? 'block' : 'none';
-            
+
             const tOverview = document.getElementById('tab-overview');
             const tLogs = document.getElementById('tab-logs');
             const tChanges = document.getElementById('tab-changes');
             const tConfig = document.getElementById('tab-config');
             const tTree = document.getElementById('tab-tree');
-            
+
             tOverview.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             tLogs.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             tChanges.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             tConfig.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             tTree.className = "border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
-            
-            if(tab === 'overview') {
+
+            if (tab === 'overview') {
                 tOverview.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
-            } else if(tab === 'logs') {
+            } else if (tab === 'logs') {
                 tLogs.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
-            } else if(tab === 'changes') {
+            } else if (tab === 'changes') {
                 tChanges.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
                 loadDiffData();
-            } else if(tab === 'config') {
+            } else if (tab === 'config') {
                 tConfig.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
-            } else if(tab === 'tree') {
+            } else if (tab === 'tree') {
                 tTree.className = "border-blue-500 text-blue-400 whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm";
             }
         }
@@ -1464,16 +1837,16 @@
         }
 
         function downloadLog() {
-            if(!currentProjectId) return;
+            if (!currentProjectId) return;
             window.open(`/api/projects/${currentProjectId}/logs/${currentLogType}/download`, '_blank');
         }
 
         function switchLog(type) {
-            if(!currentProjectId) return;
+            if (!currentProjectId) return;
             currentLogType = type;
             document.getElementById('current-log-label').innerText = `Viewing: ${type}.log`;
 
-            if(eventSource) {
+            if (eventSource) {
                 eventSource.close();
             }
 
@@ -1481,7 +1854,7 @@
             logWindow.innerHTML = '';
 
             eventSource = new EventSource(`/api/projects/${currentProjectId}/logs/${type}`);
-            eventSource.onmessage = function(event) {
+            eventSource.onmessage = function (event) {
                 const div = document.createElement('div');
                 div.textContent = event.data;
                 div.style.display = logLineMatchesFilter(event.data) ? '' : 'none';
@@ -1492,19 +1865,19 @@
                 }
                 logWindow.scrollTop = logWindow.scrollHeight;
             };
-            eventSource.onerror = function(error) {
+            eventSource.onerror = function (error) {
                 console.log("EventSource failed:", error);
                 eventSource.close();
             };
         }
 
         setInterval(() => {
-            if(currentProjectId) {
+            if (currentProjectId) {
                 fetch('/api/projects').then(r => r.json()).then(projects => {
                     const p = projects.find(x => x.id === currentProjectId);
-                    if(p) {
+                    if (p) {
                         document.getElementById('ws-phase').innerText = p.phase;
-                        
+
                         const wsStuck = document.getElementById('ws-stuck');
                         const cardWsStuck = document.getElementById('card-ws-stuck');
                         const stuckVal = parseInt(p.stuck) || 0;
@@ -1527,9 +1900,9 @@
                                 wsStuck.innerText = stuckVal;
                             }
                         }
-                        
+
                         document.getElementById('ws-status').innerText = p.status;
-                        
+
                         const isRunning = p.is_running;
                         let badgeClass = 'bg-gray-600 text-gray-200';
                         let statusLabel = p.status;
@@ -1545,11 +1918,11 @@
                         } else if (p.status === 'FAIL') {
                             badgeClass = 'bg-red-600 text-white';
                         }
-                        
+
                         const wsBadge = document.getElementById('ws-status-badge');
                         wsBadge.innerText = statusLabel;
                         wsBadge.className = `px-2 py-0.5 rounded text-xs font-semibold ${badgeClass}`;
-                        
+
                         if (p.is_running) {
                             document.getElementById('start-actions-group').style.display = 'none';
                             document.getElementById('btn-stop').style.display = 'inline-block';
@@ -1601,7 +1974,7 @@
                     // Keep sidebar + global summary live while a project is selected.
                     renderProjectList(projects);
                 });
-                
+
                 const isOverviewActive = document.getElementById('tab-overview').classList.contains('text-blue-400');
                 if (isOverviewActive) {
                     loadControlData(currentProjectId);
@@ -1622,4 +1995,5 @@
         fetchProjects();
     </script>
 </body>
+
 </html>

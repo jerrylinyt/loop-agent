@@ -53,17 +53,19 @@ Dashboard 本身**不存任何狀態**，所有資訊都即時讀自檔案系統
 ### 左側：Projects & Workspaces
 - 列出 `~/.loop/index.md` 裡所有專案，每張卡片顯示 repo 名、workspace、狀態 badge、phase、stuck。
 - 每 5 秒自動刷新。
-- 右上兩顆按鈕：
+- 右上操作按鈕：
   - **+ Init** — 對一個尚未初始化的 repo 跑 `init-project.py` 建立新 workspace，並寫進 index.md。
+  - **+ Parallel** — 對同一 repo 建立新的 git worktree + branch + workspace，成功後自動加入追蹤。
   - **+ Track** — 把一個**已經初始化過**的 workspace 加進 dashboard 追蹤（只寫 index.md，不動 repo）。
 
 ### 右側：選定專案的詳情
-頂部顯示 repo/workspace 標題、狀態 badge、路徑，以及 **Start (Auto)** / **Force Stop** 按鈕，下方三格摘要：**Phase / Stuck Level / Status**。
+頂部顯示 repo/workspace 標題、狀態 badge、路徑，以及 **Check** / **Start (Auto)** / **Force Stop** 按鈕，下方三格摘要：**Phase / Stuck Level / Status**。
+**Check** 會做啟動前檢查（需求是否已確認、config 是否還有 placeholder、run.lock 狀態、git 狀態等）；按 **Start** 前若檢查未全過，也會先提示人類確認。
 
 底下是三個分頁：
 
 - **Live Logs** — SSE 即時串流 `loop.log` 或 `plan.log`（可切換）。
-- **loop.config.yaml** — 線上編輯設定，存檔時會做 YAML 合法性驗證，不合法會擋下並提示。
+- **loop.config.yaml** — 線上編輯設定，存檔時會做 YAML 合法性驗證，不合法會擋下並提示；上方的 setup wizard 可協助填入 CLI 指令、模型與 gated/auto 模式。
 - **Planning Tree** — 僅在該 workspace 的 `TREE.md` 啟用樹模式時出現。左側畫出節點樹（依狀態上色），點節點在右側看詳情，並可對子樹按 **Reject & Replan**（把該子樹退回重新規劃；需先停止執行）。
 
 ---
@@ -77,7 +79,10 @@ Dashboard 本身**不存任何狀態**，所有資訊都即時讀自檔案系統
 | 強制停止 | 依 run.lock 的 PID kill 程序樹並清 lock | `POST /api/projects/{id}/stop` |
 | 初始化新 workspace | 跑 `init-project.py` 並登錄 index.md | `POST /api/projects/init` |
 | 追蹤既有 workspace | 把現成 workspace 加進 index.md | `POST /api/projects/add` |
+| 建立並行 worktree | 跑 `parallel.py add`，成功後自動追蹤新 workspace | `POST /api/parallel/add` |
+| 啟動前檢查 | 檢查 requirements、config、run.lock、git 狀態 | `GET /api/projects/{id}/preflight` |
 | 讀 / 存設定 | loop.config.yaml（存檔含 YAML 驗證） | `GET`/`POST /api/projects/{id}/config` |
+| 設定精靈 | 定點更新 agent 指令、模型與 generation mode | `POST /api/projects/{id}/config-wizard` |
 | 規劃樹 | 解析 TREE.md 成節點圖 | `GET /api/projects/{id}/tree` |
 | Reject 子樹 | 退回子樹並重新規劃 | `POST /api/projects/{id}/reject` |
 | 即時 log | SSE 串流 loop / plan log | `GET /api/projects/{id}/logs/{type}` |

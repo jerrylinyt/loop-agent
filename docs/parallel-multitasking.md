@@ -13,7 +13,7 @@
 - **範例動作流程**：
   1. 接收到新分支任務 -> 自動執行 `python parallel.py add <branch>` 配置 worktree。
   2. 協助使用者編輯該 worktree 中的 `loop.config.yaml` 或訪談產出 `REQUIREMENTS.md`。
-  3. **引導啟動** -> 告訴使用者啟動 `python dashboard/main.py`，並指引他們至網頁介面追蹤（Track）此新路徑，由人類手動點擊「Start」開始運行。
+  3. **引導啟動** -> 告訴使用者或直接代為啟動 `python dashboard/main.py`，並指引他們至網頁介面追蹤（Track）此新路徑，並點擊「Start」開始運行。
   4. 任務完成且已合併，需要清理環境 -> 自動執行 `python parallel.py remove <branch>`。
 
 ---

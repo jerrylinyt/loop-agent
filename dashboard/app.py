@@ -42,6 +42,14 @@ class StartRequest(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     content: str
 
+class ConfigWizardRequest(BaseModel):
+    build_cmd: str
+    fast_model: str
+    normal_model: str
+    thinking_model: str
+    mode: str = "gated"
+    extra_args: list[str] = []
+
 class InitRequest(BaseModel):
     repo_path: str
     workspace_name: str = "default"
@@ -49,6 +57,13 @@ class InitRequest(BaseModel):
 class AddProjectRequest(BaseModel):
     repo_path: str
     workspace_name: str = "default"
+
+class ParallelAddRequest(BaseModel):
+    repo_path: str
+    branch: str
+    workspace_name: Optional[str] = None
+    target_path: Optional[str] = None
+    base_ref: Optional[str] = None
 
 class RejectRequest(BaseModel):
     subtree_id: str
@@ -233,6 +248,33 @@ def index_row_matches(line: str, repo_path: str, workspace: str) -> bool:
         return False
     return parts[1] == repo_path and parts[2] == workspace
 
+def append_index_row(repo_path: str, workspace: str, phase: str = "-", stuck: str = "-", status: str = "tracked"):
+    index_path = get_index_path()
+    os.makedirs(os.path.dirname(index_path) or ".", exist_ok=True)
+    repo_name = os.path.basename(repo_path)
+    from datetime import datetime
+    ts = datetime.now().strftime("%F %T")
+    row = f"| {repo_name} | {repo_path} | {workspace} | {phase} | {stuck} | {status} | {ts} |\n"
+
+    exists = False
+    if os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        exists = any(index_row_matches(line, repo_path, workspace) for line in lines)
+
+    if exists:
+        return
+
+    if os.path.exists(index_path):
+        with open(index_path, "a", encoding="utf-8") as f:
+            f.write(row)
+    else:
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("# Loop 專案總覽（自動維護）\n\n")
+            f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
+            f.write("|------|------|-----------|-------|-------|------|------|\n")
+            f.write(row)
+
 def parse_index():
     index_path = get_index_path()
     projects = []
@@ -403,24 +445,7 @@ def init_project(req: InitRequest):
         if result.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Init failed: {result.stderr or result.stdout}")
             
-        # Add to index.md so dashboard sees it immediately
-        index_path = get_index_path()
-        os.makedirs(os.path.dirname(index_path) or ".", exist_ok=True)
-        repo_name = os.path.basename(repo_path)
-        from datetime import datetime
-        ts = datetime.now().strftime("%F %T")
-        row = f"| {repo_name} | {repo_path} | {req.workspace_name} | - | - | initialized | {ts} |\n"
-        
-        # Very simple append; the engine will overwrite this line properly on first run
-        if os.path.exists(index_path):
-            with open(index_path, "a", encoding="utf-8") as f:
-                f.write(row)
-        else:
-            with open(index_path, "w", encoding="utf-8") as f:
-                f.write("# Loop 專案總覽（自動維護）\n\n")
-                f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
-                f.write("|------|------|-----------|-------|-------|------|------|\n")
-                f.write(row)
+        append_index_row(repo_path, req.workspace_name, status="initialized")
                 
         return {"status": "initialized", "output": result.stdout}
     except Exception as e:
@@ -458,34 +483,59 @@ def add_project(req: AddProjectRequest):
         elif r_last:
             status = r_last
             
-    index_path = get_index_path()
-    os.makedirs(os.path.dirname(index_path) or ".", exist_ok=True)
-    repo_name = os.path.basename(repo_path)
-    from datetime import datetime
-    ts = datetime.now().strftime("%F %T")
-    row = f"| {repo_name} | {repo_path} | {req.workspace_name} | {phase} | {stuck} | {status} | {ts} |\n"
-    
-    exists = False
-    if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        for line in lines:
-            if index_row_matches(line, repo_path, req.workspace_name):
-                exists = True
-                break
-                
-    if not exists:
-        if os.path.exists(index_path):
-            with open(index_path, "a", encoding="utf-8") as f:
-                f.write(row)
-        else:
-            with open(index_path, "w", encoding="utf-8") as f:
-                f.write("# Loop 專案總覽（自動維護）\n\n")
-                f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
-                f.write("|------|------|-----------|-------|-------|------|------|\n")
-                f.write(row)
+    append_index_row(repo_path, req.workspace_name, phase=phase, stuck=stuck, status=status)
                 
     return {"status": "added"}
+
+@app.post("/api/parallel/add")
+def add_parallel_worktree(req: ParallelAddRequest):
+    repo_path = os.path.abspath(os.path.expanduser(req.repo_path))
+    if not os.path.isdir(repo_path):
+        raise HTTPException(status_code=400, detail="Repository path does not exist or is not a directory.")
+    if not req.branch.strip():
+        raise HTTPException(status_code=400, detail="Branch name is required.")
+
+    framework_dir = os.path.dirname(HERE)
+    parallel_py = os.path.join(framework_dir, "parallel.py")
+    cmd = [sys.executable, parallel_py, "add", req.branch.strip()]
+    workspace = (req.workspace_name or "").strip()
+    if workspace:
+        cmd.extend(["--name", workspace])
+    else:
+        workspace = req.branch.strip().replace("/", "-")
+    if req.target_path:
+        cmd.extend(["--path", os.path.abspath(os.path.expanduser(req.target_path))])
+    base_ref = (req.base_ref or "").strip()
+    if base_ref:
+        cmd.extend(["--base", base_ref])
+
+    try:
+        result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to run parallel.py: {e}")
+
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=result.stderr or result.stdout or "parallel.py add failed")
+
+    target_path = None
+    if req.target_path:
+        target_path = os.path.abspath(os.path.expanduser(req.target_path))
+    else:
+        sanitized = req.branch.strip().replace("/", "-")
+        repo_root_res = subprocess.run(["git", "-C", repo_path, "rev-parse", "--show-toplevel"], capture_output=True, text=True, encoding="utf-8")
+        repo_root = os.path.abspath(repo_root_res.stdout.strip()) if repo_root_res.returncode == 0 else repo_path
+        target_path = os.path.join(os.path.dirname(repo_root), f"{os.path.basename(repo_root)}-{sanitized}")
+
+    config_path = os.path.join(target_path, ".loop", workspace, "loop.config.yaml")
+    if os.path.exists(config_path):
+        append_index_row(target_path, workspace, status="tracked")
+
+    return {
+        "status": "created",
+        "repo_path": target_path,
+        "workspace": workspace,
+        "output": result.stdout
+    }
 
 @app.get("/api/projects/{proj_id}/human-context")
 def get_human_context(proj_id: str):
@@ -680,6 +730,176 @@ def save_config(proj_id: str, req: ConfigUpdateRequest):
         return {"status": "saved"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}")
+
+def yaml_inline(value) -> str:
+    import json
+    if isinstance(value, list):
+        return json.dumps(value, ensure_ascii=False)
+    return json.dumps(str(value), ensure_ascii=False)
+
+def replace_config_wizard_fields(content: str, req: ConfigWizardRequest) -> str:
+    replacements = {
+        ("generation", "mode"): yaml_inline(req.mode),
+        ("agent", "build_cmd"): yaml_inline(req.build_cmd.strip()),
+        ("agent", "extra_args"): yaml_inline(req.extra_args or []),
+        ("agent.models", "fast"): yaml_inline(req.fast_model.strip()),
+        ("agent.models", "normal"): yaml_inline(req.normal_model.strip()),
+        ("agent.models", "thinking"): yaml_inline(req.thinking_model.strip()),
+    }
+    seen = set()
+    lines = content.splitlines(keepends=True)
+    out = []
+    top = None
+    in_agent_models = False
+
+    for line in lines:
+        raw = line.rstrip("\r\n")
+        newline = line[len(raw):]
+        stripped = raw.lstrip()
+        indent = len(raw) - len(stripped)
+
+        if stripped and not stripped.startswith("#"):
+            top_match = re.match(r"^([A-Za-z0-9_]+)\s*:", stripped)
+            if indent == 0 and top_match:
+                top = top_match.group(1)
+                in_agent_models = False
+
+            if top == "agent" and indent == 2 and re.match(r"^models\s*:", stripped):
+                in_agent_models = True
+            elif top == "agent" and in_agent_models and indent <= 2 and not re.match(r"^models\s*:", stripped):
+                in_agent_models = False
+
+            key_match = re.match(r"^([A-Za-z0-9_]+)\s*:", stripped)
+            if key_match:
+                key = key_match.group(1)
+                section = "agent.models" if top == "agent" and in_agent_models and indent == 4 else top
+                rep_key = (section, key)
+                if rep_key in replacements:
+                    comment = ""
+                    if "#" in raw:
+                        comment = "  #" + raw.split("#", 1)[1]
+                    out.append(" " * indent + f"{key}: {replacements[rep_key]}{comment}{newline}")
+                    seen.add(rep_key)
+                    continue
+
+        out.append(line)
+
+    missing = set(replacements) - seen
+    if missing:
+        raise ValueError(f"Could not find required config fields: {', '.join('.'.join(k) for k in sorted(missing))}")
+    return "".join(out)
+
+@app.post("/api/projects/{proj_id}/config-wizard")
+def apply_config_wizard(proj_id: str, req: ConfigWizardRequest):
+    proj = get_project_by_id(proj_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if req.mode not in ["auto", "gated"]:
+        raise HTTPException(status_code=400, detail="Invalid generation mode")
+
+    required = [req.build_cmd, req.fast_model, req.normal_model, req.thinking_model]
+    if any(not (v or "").strip() for v in required):
+        raise HTTPException(status_code=400, detail="Build command and all three model names are required.")
+
+    config_path = proj["config_path"]
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            original = f.read()
+        cfg = yaml.safe_load(original) or {}
+        if not isinstance(cfg, dict):
+            raise ValueError("Config root must be a mapping")
+
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(replace_config_wizard_fields(original, req))
+        return {"status": "saved"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to update config: {e}")
+
+def requirements_path_for_project(proj: dict) -> str:
+    return os.path.join(proj["repo"], ".loop", proj["workspace"], "REQUIREMENTS.md")
+
+def has_placeholder(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        stripped = value.strip()
+        return not stripped or ("<" in stripped and ">" in stripped)
+    return False
+
+@app.get("/api/projects/{proj_id}/preflight")
+def get_preflight(proj_id: str):
+    proj = get_project_by_id(proj_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    checks = []
+
+    repo_exists = os.path.isdir(proj["repo"])
+    checks.append({"id": "repo", "label": "Repo path exists", "ok": repo_exists, "detail": proj["repo"]})
+
+    req_path = requirements_path_for_project(proj)
+    req_exists = os.path.exists(req_path)
+    req_confirmed = False
+    if req_exists:
+        try:
+            with open(req_path, "r", encoding="utf-8", errors="replace") as f:
+                req_confirmed = "REQUIREMENTS CONFIRMED" in f.read()
+        except Exception:
+            pass
+    checks.append({"id": "requirements", "label": "Requirements confirmed", "ok": req_exists and req_confirmed, "detail": "confirmed" if req_confirmed else "missing confirmation marker"})
+
+    config_ok = False
+    config_detail = "missing config"
+    cfg = {}
+    if os.path.exists(proj["config_path"]):
+        try:
+            with open(proj["config_path"], "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            config_ok = isinstance(cfg, dict)
+            config_detail = "valid YAML" if config_ok else "config root is not a mapping"
+        except Exception as e:
+            config_detail = f"invalid YAML: {e}"
+    checks.append({"id": "config_yaml", "label": "Config YAML is readable", "ok": config_ok, "detail": config_detail})
+
+    agent = cfg.get("agent", {}) if isinstance(cfg, dict) else {}
+    models = agent.get("models", {}) if isinstance(agent, dict) else {}
+    placeholders = []
+    if has_placeholder(agent.get("build_cmd")):
+        placeholders.append("agent.build_cmd")
+    for key in ["fast", "normal", "thinking"]:
+        if has_placeholder(models.get(key)):
+            placeholders.append(f"agent.models.{key}")
+    checks.append({"id": "agent_config", "label": "Agent command and models filled", "ok": not placeholders, "detail": ", ".join(placeholders) if placeholders else "ready"})
+
+    mode = ((cfg.get("generation") or {}).get("mode") if isinstance(cfg, dict) else None)
+    checks.append({"id": "generation_mode", "label": "Generation mode is valid", "ok": mode in ["auto", "gated"], "detail": str(mode or "missing")})
+
+    lock_detail = "not locked"
+    lock_ok = not proj.get("is_running") and not proj.get("stale_lock")
+    if proj.get("is_running"):
+        lock_detail = f"running pid={proj.get('pid')}"
+    elif proj.get("stale_lock"):
+        lock_detail = "stale lock present"
+    checks.append({"id": "run_lock", "label": "No active/stale run lock", "ok": lock_ok, "detail": lock_detail})
+
+    git_ok = False
+    git_detail = "not checked"
+    try:
+        r = subprocess.run(["git", "-C", proj["repo"], "status", "--short"], capture_output=True, text=True, encoding="utf-8")
+        if r.returncode == 0:
+            dirty_lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+            git_ok = True
+            git_detail = "clean" if not dirty_lines else f"{len(dirty_lines)} changed/untracked files"
+        else:
+            git_detail = r.stderr.strip() or "git status failed"
+    except Exception as e:
+        git_detail = str(e)
+    checks.append({"id": "git_status", "label": "Git status readable", "ok": git_ok, "detail": git_detail})
+
+    return {
+        "ok": all(c["ok"] for c in checks),
+        "checks": checks
+    }
 
 @app.get("/api/projects/{proj_id}/tree")
 def get_project_tree(proj_id: str):
