@@ -153,8 +153,6 @@ def cmd_add(args) -> int:
     print(f"👉 下一步（請切換至新目錄執行）：")
     print(f"   cd {target_path}")
     print(f"   python {os.path.join(FRAMEWORK, 'engine', 'run.py')} --workspace {ws_name}")
-    print(f"\n🤖 [AI Agent 自動化操作指引]")
-    print(f"   如果您是 AI Agent，您可以直接執行 `cd {target_path}` 並以 run.py 啟動 loop，無需讓人手動操作。")
     return 0
 
 
