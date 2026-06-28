@@ -104,7 +104,9 @@ def main(argv):
     print(f"     · gated（預設）：生成規劃書收斂 → 停下交你 review → 你確認後：")
     print(f"       python {FRAMEWORK}/engine/run.py --stage execute{ws_flag}")
     print(f"     · auto：加 --mode auto（生成收斂後自動接執行）")
-    print(f"  同一 repo 想同時帶另一份需求 → 重跑本檔換個 --name，兩個 workspace 可並行執行。")
+    print(f"  同一 repo 想多帶一份需求（輪流跑）→ 重跑本檔換個 --name。")
+    print(f"  想『同時』並行多條任務 → 用 git worktree（見 docs/parallel-multitasking.md / parallel.py），")
+    print(f"  別在同一個工作目錄同時跑兩個 loop（會互蓋 src/）。")
     print(f"  詳細輸出已直接印主控台；想轉跑背景看 log 才用 tail -f {ws_rel}/plan.log 或 loop.log。")
     return 0
 

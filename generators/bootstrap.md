@@ -16,18 +16,31 @@
 問清楚(不確定就問,不要腦補):
 1. **框架在哪**:`framework_path`(這份 bootstrap.md 所在的 `loop-engineering/` 目錄,或使用者指定的共享 clone 路徑,如 `~/.loop/framework`)。
 2. **目標 code repo 在哪**:要被 agent 操作、產出落地的那個既有專案路徑。
-3. **這份需求的 workspace 名稱**:同一個 repo 可以開多份需求(`.loop/<name>/`),預設用 `default`;
-   若使用者一開始就說了這是「第二份需求」之類,幫他取一個有意義的名字(如 `feature-x`)。
+3. **是否需要並行多工 (Parallel Multitasking)**:
+   - 若使用者希望對同一個 repo **同時推進多個獨立任務**，必須採用 `git worktree`。請參閱 [並行多工指引](docs/parallel-multitasking.md)。
+   - 確認要建立的分支名稱 (如 `loop/feat-x`)。
+4. **這份需求的 workspace 名稱**:同一個 repo 可以開多份需求(`.loop/<name>/`),預設用 `default`;
+   若是並行多工，預設取與分支名稱相同的名字 (如 `loop-feat-x`)。
 
 ## STEP 1｜執行專案初始化（唯一允許的 python，一次性、秒級）
 
-用你的 shell 工具執行(把 `<framework_path>` / `<repo>` / `<name>` 換成 STEP 0 確認的值):
-```bash
-pip install -r <framework_path>/requirements.txt
-python3 <framework_path>/init-project.py <repo> --name <name>
-```
-這只會安裝框架所需的依賴（如 PyYAML）並建立 `.loop/<name>/`(REQUIREMENTS/config 樣板 + `.gitignore`)，**不會啟動任何收斂迴圈**,
-跑完馬上結束、安全。若指令印出「= 已存在,略過」,代表這個 workspace 已經初始化過,跳過此步驟即可。
+根據 STEP 0 的並行需求，用你的 shell 工具執行(把 `<framework_path>` / `<repo>` / `<name>` / `<branch>` 換成確認的值):
+
+- **一般單一任務初始化**：
+  ```bash
+  pip install -r <framework_path>/requirements.txt
+  python3 <framework_path>/init-project.py <repo> --name <name>
+  ```
+  這只會安裝框架所需的依賴（如 PyYAML）並建立 `.loop/<name>/`(REQUIREMENTS/config 樣板 + `.gitignore`)。
+
+- **並行多工初始化** (在主 repo 根目錄執行，會自動建立 worktree、切換分支並建立 workspace)：
+  ```bash
+  pip install -r <framework_path>/requirements.txt
+  python3 <framework_path>/parallel.py add <branch> --name <name>
+  ```
+  ⚠️ **注意**：使用並行多工初始化成功後，請將接下來的指令執行目錄切換至新產生的 worktree 目錄下（例如：`cd ../<repo>-<sanitized-branch>`），再繼續下述步驟。
+
+跑完專案初始化後馬上結束，安全。若單一任務初始化印出「= 已存在,略過」,代表這個 workspace 已經初始化過,跳過此步驟即可。
 
 ## STEP 2｜填寫 Agent 執行設定（人類決策點：CLI / 模型）
 
