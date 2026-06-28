@@ -11,6 +11,11 @@
 ## 2. 安全紅線（絕不做）
 - ❌ `git reset --hard`、`git clean -fd/-fdx`、`git checkout .`（無差別覆蓋,會吃掉本輪以外的好東西）
 - ❌ `git push --force`
+- ❌ **改寫已提交歷史**:`git commit --amend`、`git rebase`(含 `-i`)、`git reset --soft/--mixed` 退回前輪 commit、`git filter-branch`/`filter-repo`。
+  > 為什麼:本框架靠「**一輪一 commit**」當還原點,且 Git Review Gate 以 `last_safe_sha → HEAD` 的 diff 審查上一輪。
+  > 改寫/合併/抹除歷史會毀掉還原點、讓 `last_safe_sha` 失效、並可被用來「重設輪次、掩蓋上一輪的壞改」。
+  > 🚨 強制約束:每一輪只能**新增**一個 commit(STEP C);❌ 嚴禁修改、合併、刪除、或重新排序任何**既有** commit。
+  > 要修前幾輪的錯 → 用局部編輯做成「本輪的新 commit」(必要時 `git checkout <hash> -- <檔>` 取回舊版內容再改),不准動歷史本身。
 - ❌ 刪除 `.git`、刪除輸入來源
 - ✅ 只允許「逐檔還原」:`git checkout HEAD -- <指定檔>`
 

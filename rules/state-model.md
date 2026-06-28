@@ -45,6 +45,12 @@ tree_structure_error: ""             # 觸發旗標:執行期發現結構錯誤(
                                      #    證據另寫進一張 BLOCKING Issue(哪個整合驗證項失敗 / 缺哪個葉子 /
                                      #    對照哪條 REQUIREMENTS)。❌ 嚴禁無 Issue 佐證就設 true 來規避執行期苦工;
                                      #    無證據 Issue 的結構錯宣告視為無效。
+                                     # 🚨 機械前提(比照 FROZEN,防自抬逃生閥,見 oscillation-escalation.md §E):
+                                     #    設 true 前,所引用的整合驗證項【必須】在 last_round_result 歷史中
+                                     #    實際出現過 FAIL(或該葉子 reflow_count>0)——光憑散文宣稱「需再拆」不算。
+                                     #    ❌ 嚴禁把「這片葉子難做/我做不出來」當「結構缺漏」上報:難 → 繼續做或走
+                                     #    升級階梯(換模型),不是設 tree_structure_error。結構錯僅限「客觀缺葉子/
+                                     #    整合驗證證明現有葉子拼不出需求」,且須有上述機械 FAIL 訊號佐證。
 ```
 
 ### 設定 vs 狀態（最重要的一刀）

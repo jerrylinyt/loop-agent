@@ -24,6 +24,15 @@
 3. **不合理狀態進展**
    - 狀態的跳躍是否過於誇張？（例如：`p1_consecutive_pass` 從 1 突然變成 8，或是突然把一堆未執行的任務全部標記為完成）。
    - 檢查改動是否符合邏輯，不可憑空跳號。
+   - **計數器單輪增量上限 = 1（防一輪灌滿）**：本框架「一輪一動作」，故任一 `conv` 與任一
+     `p{i}_consecutive_pass` 在**單次 commit 內最多 +1**。Diff 若顯示同一計數器一輪 +2 以上 → FLAG → REVERT。
+   - **禁狀態跳級**：任務 status 只能逐級走，單輪最多前進一級。合法單步：`TODO→DRAFTED`、
+     `DRAFTED→CONVERGED`(且此輪 conv 剛好達門檻)、`NEEDS_REVISION→DRAFTED`。
+     ❌ 非法跳級(FLAG → REVERT)：`TODO→CONVERGED` 一步到位、conv 未達門檻卻標 CONVERGED、
+     一輪把多個任務同時推進狀態。
+   - **任務列被重排 / 插隊 (防挑軟柿子)**：狀態表的任務列順序是 plan 期定案的硬約束，執行期不得更動。
+     Diff 若顯示任務列被搬移、重新排序、或難任務被往後挪（boot-sequence STEP 4 嚴禁的「亂跳挑選」），
+     即 FLAG → REVERT。（純粹更新某列的 status/conv 欄位、不動列序，屬正常。）
 
 4. **中間區段被挖空**
    - 需求或任務清單的中間部分是否被無故刪除？
@@ -61,11 +70,40 @@
     - ⚠️ 範圍：純分析輪、文件輪、或本輪未宣稱 PASS/未 +1 的輪次,不需要 build/test 原始輸出;但若本輪新增或修改分析結論、規格判斷、任務拆解、驗收項目,仍必須在 diff 中看得到來源 trace（檔:行 / 需求 ID / Issue ID / scratch 重推稿路徑）或任務規格要求的 evidence。
     - 只看到新增結論,卻沒有任何來源 trace 或 evidence → REVERT。這類輪次雖不要求 build/test,但仍不得讓無來源的主觀判斷進入 DRAFTED/CONVERGED 產物。
 
+12. **收斂計數防偽 (Convergence Counter Forgery)** ⚠️ 主觀分析任務最易造假處,務必嚴查
+    - 本輪是否讓任一任務的單任務收斂計數 `conv` 上升(`conv N→N+1`),或讓集合穩定 `converge` 上升?
+      (即使該任務無 build/test 把關、屬主觀分析/列舉,此條一樣適用——不因「沒有編譯器」而豁免。)
+    - 若是,diff 內【必須】含本輪對應的獨立驗證證據檔:
+        · 單任務重驗 → `<outputs>/.reverify/<task>-R###.md`(見 convergence.md);
+        · 大範圍列舉 → `<outputs>/.enum/<task>-R###.md`(見 completeness.md)。
+      **證據檔不存在,或不是本輪(R### 對不上)的 → REVERT**(無證據不得 +1)。
+    - 抽查獨立性(證據檔存在 ≠ 真獨立):隨機挑該檔 ≥1 項,核對它標注的原始輸入 `檔:行` 是否真的支持
+      該結論。若發現重推稿其實是**引用/貼上既有產出檔的內容或路徑**(而非從原始輸入重推)、或關鍵項
+      缺 `檔:行` 來源 → REVERT(視同未獨立重推,見 convergence.md「防偽獨立」)。
+    - ⚠️ 範圍:本輪未動任何收斂計數的輪次不適用此條。
+
+13. **產出異動卻沒歸零收斂 (Silent Output Change)**
+    - 本輪 diff 是否改動了某任務的**產出檔**(該任務 output 範圍內的正式產物)?
+    - 若是,該任務本輪【必須】conv 歸零(`conv=0`)、且本輪**不得**標 CONVERGED——因為「產出有變」代表
+      上一稿不是最終稿,連續一致計數必須重數。Diff 顯示「產出被改」卻同時 `conv` 不歸零 / 直接標 CONVERGED
+      → FLAG → REVERT。
+    - ⚠️ 排除:scratch 證據檔(`.reverify/` `.enum/` `.validate/`)、Issue 檔、CONTROL 狀態欄位本身不算
+      「產出異動」;重驗一致那輪本來就會新增這些 scratch 檔,不因此要求歸零。只看**正式產出檔**有沒有被改。
+
+14. **整合輪越界改葉子 (Integration Round Touching Leaf)** ⚠️ 樹模式專屬,垂直震盪逃逸
+    - 本輪是否為整合 / 中間節點的**驗證輪**(`last_round_mode==驗證` 且處理的是非葉子節點)?
+    - 若是,diff 是否動到了**葉子專屬檔案**(某葉子 output 範圍內的檔)?整合輪只准改整合層自己的檔
+      (router 註冊 / 整合測試 / `integration_contract`),不准就地 patch 葉子。
+    - 葉子內容若需修,必須改走 reflow(設 `NEEDS_REVISION` + `tree_reflow_target` + `reflow_count+=1`),
+      下一輪由葉子模型修。Diff 顯示整合輪直接改葉子程式碼、卻沒有對應 reflow 宣告 → FLAG → REVERT
+      (這是繞過 `max_leaf_reflow` 斷路器的垂直震盪逃逸,見 oscillation-escalation.md §C-1)。
+
 ## 3. 輸出格式
 
 🚨 強制約束(你是最後一道安全網,你的判決本身不准被橡皮圖章):判決檔【必須】先附上
 **逐條紅線檢查清單**——上面 §2 的每一條(中斷殘留、排版/狀態破壞、不合理進展、中間挖空、思考外洩、
-語意一致、佔位符偷懶、刪檔/路徑幻覺、衝突標記、語法全毀、驗收證據缺失),逐條標 `PASS` 或 `FLAG`,
+語意一致、佔位符偷懶、刪檔/路徑幻覺、衝突標記、語法全毀、驗收證據缺失、收斂計數防偽、
+產出異動未歸零、整合輪越界改葉子),逐條標 `PASS` 或 `FLAG`,
 凡 `FLAG` 必附 檔:行 或片段佐證。❌ 嚴禁:只寫一句「看起來正常」就給 PASS;
 **沒有逐條清單的 PASS 判決一律視為無效**(等同未審查)。
 
