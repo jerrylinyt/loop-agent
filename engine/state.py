@@ -133,28 +133,14 @@ def rounds_log_path(cfg: dict) -> str:
 
 
 def append_round_record(cfg: dict, record: dict) -> None:
-    """Append 一行逐輪紀錄到 rounds.jsonl，並限制最多保留 100 筆紀錄。
+    """Append 一行 trace 紀錄到 rounds.jsonl。
     Best-effort：失敗只記 warning，絕不中斷主迴圈。"""
     p = rounds_log_path(cfg)
     try:
         os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-        
-        # 讀取現有紀錄
-        lines = []
-        if os.path.exists(p):
-            with open(p, "r", encoding="utf-8", errors="replace") as f:
-                lines = [l for l in f if l.strip()]
-                
-        # 新增此輪紀錄
         line = json.dumps(record, ensure_ascii=False) + "\n"
-        lines.append(line)
-        
-        # 保留最後 100 筆
-        if len(lines) > 100:
-            lines = lines[-100:]
-            
-        with open(p, "w", encoding="utf-8") as f:
-            f.writelines(lines)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(line)
     except (OSError, TypeError, ValueError) as e:
         logger.warning(f"Failed to append round record: {e}")
 

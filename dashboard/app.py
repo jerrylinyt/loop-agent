@@ -1135,9 +1135,11 @@ def get_project_rounds(proj_id: str, limit: int = 200):
         if not line:
             continue
         try:
-            records.append(json.loads(line))
+            record = json.loads(line)
         except (json.JSONDecodeError, ValueError):
             continue
+        if record.get("type", "round_finished") == "round_finished":
+            records.append(record)
     return records
 
 @app.get("/api/projects/{proj_id}/activity")

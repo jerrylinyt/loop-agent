@@ -66,6 +66,10 @@ def load_fail_history(state_dir: str) -> list[str]:
             logger.warning(f"Failed to read fail_history in {state_dir}: {e}")
     return fingerprints
 
+def is_round_record(record: dict) -> bool:
+    """Return True for completed round records, including legacy untyped rows."""
+    return record.get("type", "round_finished") == "round_finished"
+
 def main():
     ap = argparse.ArgumentParser(description="Loop 4 Trace Collector & Aggregator")
     ap.add_argument("--index", default=os.path.expanduser("~/.loop/index.md"),
@@ -127,23 +131,26 @@ def main():
                         record["ws"] = ws["workspace"]
                         record["repo_path"] = ws["repo_path"]
                         
-                        # Extract fail fingerprint if exists
-                        fp = record.get("fail_fingerprint")
-                        if fp:
-                            fingerprints.append(fp)
-                        
                         # Apply --since filter if provided
                         if args.since:
                             ts_val = record.get("ts", "")
                             if ts_val and ts_val < args.since:
                                 continue
 
-                        all_rounds.append(record)
-                        
                         # Track latest run_id for fail_history mapping
                         run_id = record.get("run_id")
                         if run_id:
                             workspace_latest_run[ws_key] = run_id
+
+                        if not is_round_record(record):
+                            continue
+
+                        # Extract fail fingerprint from completed rounds only.
+                        fp = record.get("fail_fingerprint")
+                        if fp:
+                            fingerprints.append(fp)
+
+                        all_rounds.append(record)
                     except json.JSONDecodeError as je:
                         logger.warning(f"Malformed JSON on line {line_idx} in {rounds_path}: {je}")
             

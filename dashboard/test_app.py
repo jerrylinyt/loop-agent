@@ -370,6 +370,31 @@ def test_rounds_history_logging():
         assert data["run_id"] == "test_run:default:12345"
         assert data["round"] == 1
 
+
+def test_rounds_history_append_only_keeps_more_than_100_records():
+    import sys
+    import json
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "engine"))
+    from state import append_round_record, rounds_log_path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cfg = {"runtime": {"state_dir": tmpdir}}
+
+        for i in range(105):
+            append_round_record(cfg, {
+                "run_id": "test_run:default:12345",
+                "type": "round_finished",
+                "round": i + 1,
+                "loop_type": "execute",
+            })
+
+        with open(rounds_log_path(cfg), "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        assert len(lines) == 105
+        assert json.loads(lines[0])["round"] == 1
+        assert json.loads(lines[-1])["round"] == 105
+
 def test_collect_traces_metrics():
     import sys
     import subprocess
@@ -431,6 +456,55 @@ def test_collect_traces_metrics():
 
         # Verify watchdog_kill_rate (0 killed rounds)
         assert summary["metrics"]["watchdog_kill_rate"]["overall"] == 0.0
+
+
+def test_collect_traces_ignores_non_round_events():
+    import sys
+    import subprocess
+    import json
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_a = os.path.join(tmpdir, "repo-a")
+        state_dir = os.path.join(repo_a, ".loop", "default", ".loop_state")
+        os.makedirs(state_dir, exist_ok=True)
+
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("| Project | repo | workspace | phase | stuck | status | updated |\n")
+            f.write(f"| repo-a | {repo_a} | default | 1 | 0 | tracked | t |\n")
+
+        records = [
+            {"run_id": "a:default:1", "type": "run_started", "ts": "2026-06-27 21:59:00"},
+            {"run_id": "a:default:1", "type": "round_finished", "round": 1,
+             "loop_type": "execute", "phase": "1", "result": "FAIL",
+             "consecutive_pass": 0, "progressed": False, "stuck_level": 1,
+             "enhanced_rounds_used": 0, "ts": "2026-06-27 22:00:00"},
+            {"run_id": "a:default:1", "type": "human_required",
+             "message": "needs review", "ts": "2026-06-27 22:01:00"},
+        ]
+        with open(os.path.join(state_dir, "rounds.jsonl"), "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record) + "\n")
+
+        collect_py = os.path.join(os.path.dirname(os.path.dirname(__file__)), "engine", "collect_traces.py")
+        out_dir = os.path.join(tmpdir, "out")
+        result = subprocess.run([
+            sys.executable, collect_py,
+            "--index", index_path,
+            "--out", out_dir,
+            "--k", "2"
+        ], capture_output=True, text=True)
+
+        assert result.returncode == 0
+
+        with open(os.path.join(out_dir, "summary.json"), "r") as sf:
+            summary = json.load(sf)
+        with open(os.path.join(out_dir, "snapshot.jsonl"), "r") as sf:
+            snapshot_lines = sf.readlines()
+
+        assert summary["totals"]["rounds"] == 1
+        assert summary["metrics"]["escalation_rate"]["overall"] == 1.0
+        assert len(snapshot_lines) == 1
 
 
 def test_collect_traces_spec_conflict_suspect():
