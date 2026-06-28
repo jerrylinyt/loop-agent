@@ -9,10 +9,11 @@
 如果您是正在執行任務的 AI Agent（例如 Claude Code、Gemini CLI、Antigravity 等）：
 - **您已被授權直接執行初始化與多工管理指令**。您可以直接操作 `python init-project.py` 或呼叫 `python parallel.py add` 協助使用者快速配置並建立多個並行工作區 (worktree) 來進行作業。
 - **請引導使用者透過 Web Dashboard 進行啟動與監控**。在工作區與需求文件配置完成後，為減少使用者手動輸入 `python run.py` 命令的負擔，**請引導使用者執行 Dashboard 服務**（如 `python dashboard/main.py`）並於瀏覽器 `http://127.0.0.1:8000` 中，使用 `+ Track` 追蹤新的工作區，並點擊「Start」一鍵啟動任務。
+- 🚨 **安全性紅線**：AI Agent **絕對不允許**在任何情況下自行呼叫 `python run.py`、`python engine/run.py` 或任何會啟動引擎收斂長迴圈的指令。長迴圈的啟動與消耗模型的決策，必須嚴格保留給人類。Agent 在這套並行機制中，僅被授權進行工作區的準備與管理（如 `init-project.py`、`parallel.py`）。
 - **範例動作流程**：
   1. 接收到新分支任務 -> 自動執行 `python parallel.py add <branch>` 配置 worktree。
   2. 協助使用者編輯該 worktree 中的 `loop.config.yaml` 或訪談產出 `REQUIREMENTS.md`。
-  3. **引導啟動** -> 告訴使用者或直接代為啟動 `python dashboard/main.py`，並指引他們至網頁介面追蹤（Track）此新路徑，並點擊「Start」開始運行。
+  3. **引導啟動** -> 告訴使用者啟動 `python dashboard/main.py`，並指引他們至網頁介面追蹤（Track）此新路徑，由人類手動點擊「Start」開始運行。
   4. 任務完成且已合併，需要清理環境 -> 自動執行 `python parallel.py remove <branch>`。
 
 ---
