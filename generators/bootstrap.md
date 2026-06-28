@@ -29,7 +29,22 @@ python3 <framework_path>/init-project.py <repo> --name <name>
 這只會安裝框架所需的依賴（如 PyYAML）並建立 `.loop/<name>/`(REQUIREMENTS/config 樣板 + `.gitignore`)，**不會啟動任何收斂迴圈**,
 跑完馬上結束、安全。若指令印出「= 已存在,略過」,代表這個 workspace 已經初始化過,跳過此步驟即可。
 
-## STEP 2｜需求訪談
+## STEP 2｜填寫 Agent 執行設定（人類決策點：CLI / 模型）
+
+問清楚(不確定就問,不要腦補):
+1. **使用哪個 CLI** 來跑 agent(Claude Code / opencode / gemini-cli / codex…),對應到
+   `agent.build_cmd`(模板預設 `opencode run -m {model} {prompt}`;`{model}`/`{prompt}` 佔位依所選 CLI 的實際語法調整位置)。
+2. **三個模型層**(`agent.models.fast / normal / thinking`)——分別用在「葉子執行 / Git Review Gate」
+   「主要 Execute / Plan」「卡關升級的高階模型」,照所選 CLI 支援的模型名稱填上實際值。
+
+把這兩項直接寫進 STEP 1 剛建好的 `<repo>/.loop/<name>/loop.config.yaml` 的 `agent:` 區塊,
+覆蓋 `build_cmd` 與 `models.fast/normal/thinking` 的佔位值。
+
+⚠️ **這一步必須在這裡(由人類)完成,不能留給階段②生成規劃書的 agent 事後填**——
+`engine/plan_loop.py` 啟動時的 preflight 健檢會檢查 `agent.models.*` 是否仍是佔位值,
+若是會直接擋下(回傳錯誤、不進入規劃迴圈),所以規劃 agent 根本沒有機會先跑起來再補填。
+
+## STEP 3｜需求訪談
 
 依 `0-requirements-interview.md` 的問題清單,**一組一組問清楚**(不要一次轟炸),把答案寫進
 `.loop/<name>/REQUIREMENTS.md`(STEP 1 已建好樣板,照填即可;`templates/REQUIREMENTS.template.md` 是其來源)。
@@ -37,13 +52,13 @@ python3 <framework_path>/init-project.py <repo> --name <name>
 - 若輸入資料很大(大檔/大量項目)→ 標記「需要大範圍防漏協定」,留給階段②的生成器處理。
 - 提醒使用者:之後的執行階段**不會把資料整批讀進 context**;完整性靠列舉清單 + 行覆蓋。
 
-## STEP 3｜人類確認需求（停止點之一）
+## STEP 4｜人類確認需求（停止點之一）
 
 把寫好的 `REQUIREMENTS.md` 完整內容(或摘要)念給使用者確認**逐條需求**是否正確、有無遺漏。
 使用者確認後,在檔案標記 **REQUIREMENTS CONFIRMED(日期/確認人)**。
 **未確認前不要往下走**——尤其不要自己接著去跑生成規劃書。
 
-## STEP 4｜停下來，把下一步指令交給人類
+## STEP 5｜停下來，把下一步指令交給人類
 
 需求確認後,**到此為止**。輸出大致像這樣的收尾訊息(依實際路徑/workspace 名稱替換):
 
@@ -70,5 +85,5 @@ python3 <framework_path>/init-project.py <repo> --name <name>
 
 ## 給「人」的使用說明（非 agent 指令，供你自己參考）
 1. 開一個全新 agent session(任何 CLI 都行),貼上這份 `bootstrap.md` 全文 + 你的初步想法(一兩句話也行)。
-2. agent 會問你問題、帶你把 STEP 0~3 走完,最後印出指令給你。
+2. agent 會問你問題、帶你把 STEP 0~4 走完,最後印出指令給你。
 3. 你看過指令、確認沒問題後,**自己貼上去跑**——之後就是 `run.py` 接手反覆觸發、直到收斂或交人類裁決。

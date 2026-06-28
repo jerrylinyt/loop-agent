@@ -189,6 +189,13 @@ def preflight(cfg: dict, stage: str) -> tuple[list[str], list[str]]:
     req = os.path.join(loop_dir, "REQUIREMENTS.md")
     if stage == "plan" and not os.path.exists(req):
         errors.append(f"找不到 {req}（請先完成階段①需求）。")
+    elif stage == "plan" and os.path.exists(req):
+        with open(req, encoding="utf-8") as f:
+            req_text = f.read()
+        if "REQUIREMENTS CONFIRMED" not in req_text:
+            warnings.append(f"{req} 尚未標記 REQUIREMENTS CONFIRMED——"
+                            f"應由人類逐條確認需求後在檔案內標記（見 generators/bootstrap.md STEP 4），"
+                            f"再進入規劃書生成。")
     if stage == "execute" and not os.path.exists(cfg.get("control", "")):
         errors.append(f"找不到 {cfg.get('control')}（請先完成階段②生成規劃書）。")
     return errors, warnings
