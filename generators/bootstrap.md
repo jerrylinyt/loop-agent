@@ -78,17 +78,18 @@
 ```
 ✅ 前期準備完成：.loop/<name>/REQUIREMENTS.md 已確認。
 
-接下來是「生成規劃書」與「執行」——這兩段都是會持續跑到收斂為止的 python 迴圈，
-請你自己決定何時啟動：
+為了減少手動執行 Python 引擎指令的負擔，強烈建議您啟動 Web 控制台（Dashboard）來管理與運行您的 Loop：
 
-  cd <repo>
-  python3 <framework_path>/engine/run.py --workspace <name>
+  python dashboard/main.py
 
-  · 預設 gated 模式：規劃書生成收斂後會停下來等你 review，你 review 完再跑：
-      python3 <framework_path>/engine/run.py --workspace <name> --stage execute
-  · 想全自動可加 --mode auto。
+啟動後請在瀏覽器開啟 http://127.0.0.1:8000：
+- 若使用的是並行工作區 (git worktree)，請點選左側「+ Track」按鈕登錄該工作目錄與 workspace。
+- 在對應專案卡片詳情中點選「Start」即可一鍵啟動任務！
+- 您可在 Web 介面上即時觀看 Log、線上編輯 loop.config.yaml 或查看與操作 Planning Tree。
 
-我不會自己執行這個指令。
+(手動 CLI 啟動備案：python3 <framework_path>/engine/run.py --workspace <name>)
+
+我不會自己執行這個啟動/長迴圈指令。
 ```
 
 ❌ **不要**自己呼叫 `plan_loop.py`、`run.py`、`loop.py`，也不要建議用背景/nohup 方式偷跑——

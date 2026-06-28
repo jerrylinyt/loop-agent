@@ -7,12 +7,13 @@
 ## 1. 🤖 給 AI Agent 的自動化操作指南
 
 如果您是正在執行任務的 AI Agent（例如 Claude Code、Gemini CLI、Antigravity 等）：
-- **您已被授權直接執行多工管理指令**。當使用者要求建立新任務分支、查詢並行任務狀態、或清理已完成的分支時，**請直接使用您的終端機/命令執行工具**呼叫 `python parallel.py` 家族命令。
-- **請儘量避免將指令印出並等待人類手動複製貼上執行**。請主動執行命令並將結果回報給使用者。
+- **您已被授權直接執行初始化與多工管理指令**。您可以直接操作 `python init-project.py` 或呼叫 `python parallel.py add` 協助使用者快速配置並建立多個並行工作區 (worktree) 來進行作業。
+- **請引導使用者透過 Web Dashboard 進行啟動與監控**。在工作區與需求文件配置完成後，為減少使用者手動輸入 `python run.py` 命令的負擔，**請引導使用者執行 Dashboard 服務**（如 `python dashboard/main.py`）並於瀏覽器 `http://127.0.0.1:8000` 中，使用 `+ Track` 追蹤新的工作區，並點擊「Start」一鍵啟動任務。
 - **範例動作流程**：
-  1. 接收到新分支任務 -> 自動執行 `python parallel.py add <branch>`
-  2. 需要確認當前所有並行任務狀態 -> 自動執行 `python parallel.py list`
-  3. 任務完成且已合併，需要清理環境 -> 自動執行 `python parallel.py remove <branch>`
+  1. 接收到新分支任務 -> 自動執行 `python parallel.py add <branch>` 配置 worktree。
+  2. 協助使用者編輯該 worktree 中的 `loop.config.yaml` 或訪談產出 `REQUIREMENTS.md`。
+  3. **引導啟動** -> 告訴使用者或直接代為啟動 `python dashboard/main.py`，並指引他們至網頁介面追蹤（Track）此新路徑，並點擊「Start」開始運行。
+  4. 任務完成且已合併，需要清理環境 -> 自動執行 `python parallel.py remove <branch>`。
 
 ---
 
@@ -62,8 +63,11 @@ cd ../myrepo-featA
 # 3. 初始化對應的 workspace (指回原本的共享框架路徑 $FW)
 python3 $FW/init-project.py . --name featA
 
-# 4. 啟動規劃與執行 Loop (在該 worktree 獨立執行)
-python3 $FW/engine/run.py --workspace featA
+# 4. 啟動規劃與執行 Loop (推薦使用 Web Dashboard 啟動，避免手動跑 python 命令)
+#    A) 在框架根目錄執行：python dashboard/main.py 啟動控制台
+#    B) 開啟 http://127.0.0.1:8000 點擊「+ Track」追蹤此 worktree 目錄與 workspace (featA)
+#    C) 點擊「Start」按鈕一鍵啟動
+#    (手動 CLI 啟動備案：python3 $FW/engine/run.py --workspace featA)
 
 # 5. 任務完成後，切換回原本的主 worktree 目錄
 cd -

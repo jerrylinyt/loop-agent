@@ -150,9 +150,14 @@ def cmd_add(args) -> int:
 
     print(res_init.stdout.strip())
     print("\n✅ 並行工作區建立完成！")
-    print(f"👉 下一步（請切換至新目錄執行）：")
-    print(f"   cd {target_path}")
-    print(f"   python {os.path.join(FRAMEWORK, 'engine', 'run.py')} --workspace {ws_name}")
+    print(f"👉 下一步（推薦使用 Dashboard 啟動與管理）：")
+    print(f"   1. 若 Dashboard 尚未啟動，請在框架根目錄執行以下指令啟動：")
+    print(f"      python dashboard/main.py")
+    print(f"   2. 開啟瀏覽器進入 http://127.0.0.1:8000")
+    print(f"   3. 點擊左上角的「+ Track」按鈕，將新工作區登錄至 Dashboard 中：")
+    print(f"      - 專案路徑 (Project Path) 指向：{target_path}")
+    print(f"      - Workspace 名稱填寫：{ws_name}")
+    print(f"   4. 在網頁介面點擊「Start」按鈕一鍵啟動，即可在 Web 介面即時監控 Log！")
     return 0
 
 
