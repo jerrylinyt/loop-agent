@@ -58,7 +58,8 @@
     - 本輪是否在 CONTROL 把 `last_round_result` 標 `PASS`、或讓 `p{i}_consecutive_pass` 往上 +1（宣稱推進/收斂）？
     - 若是，且該任務是「**可驗證的任務**」（有 build/test/編譯器把關，或 boot-sequence STEP 4 要求寫「驗證證據檔」的驗證模式）——請在 diff、commit message、或證據檔（如 `<outputs>/.validate/p{i}-R###.md`）裡找**實際執行的指令與輸出**。
     - 只看到一句「全部 PASS / 全綠 / 已驗證」卻**找不到任何可抽查的指令輸出或證據檔** → REVERT。這與 §2-3「不合理狀態進展」同族：自評 PASS 必須留下證據，否則等同橡皮圖章式的假推進，不得換取收斂計數。
-    - ⚠️ 範圍：純分析輪、文件輪、或本輪未宣稱 PASS/未 +1 的輪次**不適用**此條（沒有宣稱就不需要證據）。
+    - ⚠️ 範圍：純分析輪、文件輪、或本輪未宣稱 PASS/未 +1 的輪次,不需要 build/test 原始輸出;但若本輪新增或修改分析結論、規格判斷、任務拆解、驗收項目,仍必須在 diff 中看得到來源 trace（檔:行 / 需求 ID / Issue ID / scratch 重推稿路徑）或任務規格要求的 evidence。
+    - 只看到新增結論,卻沒有任何來源 trace 或 evidence → REVERT。這類輪次雖不要求 build/test,但仍不得讓無來源的主觀判斷進入 DRAFTED/CONVERGED 產物。
 
 ## 3. 輸出格式
 
