@@ -80,6 +80,7 @@
 
 為了減少手動執行 Python 引擎指令的負擔，強烈建議您啟動 Web 控制台（Dashboard）來管理與運行您的 Loop：
 
+  cd <framework_path>
   python dashboard/main.py
 
 啟動後請在瀏覽器開啟 http://127.0.0.1:8000：
@@ -87,7 +88,10 @@
 - 在對應專案卡片詳情中點選「Start」即可一鍵啟動任務！
 - 您可在 Web 介面上即時觀看 Log、線上編輯 loop.config.yaml 或查看與操作 Planning Tree。
 
-(手動 CLI 啟動備案：python3 <framework_path>/engine/run.py --workspace <name>)
+(手動 CLI 啟動備案：
+  cd <repo-or-worktree-path>
+  python3 <framework_path>/engine/run.py --workspace <name>
+)
 
 我不會自己執行這個啟動/長迴圈指令。
 ```

@@ -25,6 +25,7 @@
 5. **限制與已知風險**:技術限制、不能動的東西、外部依賴、已知地雷。
 6. **這是哪一類任務**:逆向/遷移/大量產生/資料清洗/分析…(影響階段怎麼切)。
 7. **工作區拓撲**:被改的 code repo 在哪?loop 規劃書放它的 `.loop/<name>/`(`<name>`=這份需求的 workspace 名稱,`in_repo`,建議)?還是需 `branch`/`sidecar`?(見 `rules` 與 config `workspace.mode`)
+   - 若使用者要讓**同一個 repo 的多條任務同時跑**，不要在同一工作目錄開第二個 loop;請回到 bootstrap/`parallel.py add` 的 git worktree 流程，讓每條任務有自己的 worktree + branch。
 
 ## 防漏 / 防爆提醒（問的時候就要帶出來）
 - 若輸入很大(大檔/大量項目)→ 標記「需要大範圍防漏協定」(completeness),之後階段②要對應安排列舉清單。
