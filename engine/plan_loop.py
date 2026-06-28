@@ -174,6 +174,8 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
     log_both(f"\n########## PLAN LOOP 啟動 {datetime.now():%F %T}  mode={mode} ##########")
     hb(f"規劃書生成迴圈啟動。框架={fw}  詳細輸出:{log_path}（tail -f 觀看）\n")
 
+    rounds_since = as_int(get_val(plan_md, "plan_rounds_since_progress"))
+
     for i in range(1, max_rounds + 1):
         rotate_log_if_needed(cfg)
         if lock_path:
