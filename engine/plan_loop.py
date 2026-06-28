@@ -16,7 +16,7 @@ from datetime import datetime
 
 from config import load_config, fmt_prompt, select_model, model_tier_label
 from git_utils import in_git_repo, changed_files, git_guard
-from state import get_val, set_val, as_int, append_round_record
+from state import get_val, set_val, as_int, append_round_record, check_stop_requested, set_plan_human_required
 from agent_runner import build_cmd, run_agent
 from tree import (
     tree_enabled, tree_md_path, seed_tree,
@@ -177,6 +177,8 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
     rounds_since = as_int(get_val(plan_md, "plan_rounds_since_progress"))
 
     for i in range(1, max_rounds + 1):
+        if check_stop_requested(cfg, log_both):
+            return 1
         rotate_log_if_needed(cfg)
         if lock_path:
             touch_run_lock(lock_path)
@@ -266,7 +268,7 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
             set_val(plan_md, "plan_model_tier", upgraded_tier)
             log_both(f"  ⬆ 規劃書連續 {rounds_since} 個 cycle 無進展 → 升級模型（{upgraded_tier}）。")
         elif plan_stuck >= 1 and rounds_since >= osc["stall_threshold"] + osc["enhanced_max_rounds"]:
-            set_val(plan_md, "plan_human_required", "true")
+            set_plan_human_required(plan_md, True, "plan_stuck_threshold_exceeded", f"規劃書連續 {rounds_since} 個 cycle 無進展，且已嘗試增強模型，停止交人。")
             set_val(plan_md, "plan_status", "stuck_human")
             log_both(f"  ⛔ 升級模型仍無進展 → 規劃書交人類裁決,停止。")
             set_val(plan_md, "plan_rounds_since_progress", str(rounds_since))
@@ -303,7 +305,8 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
 
     if get_val(plan_md, "plan_status") not in ("converged",):
         log_both(f"⛔ 規劃書未在 {max_rounds} 個 cycle 內收斂,請人工檢視 {plan_md} 與 .loop/。")
-        return 1
+        set_plan_human_required(plan_md, True, "max_rounds_reached", f"規劃書未在 {max_rounds} 個 cycle 內收斂，達到硬性上限")
+        return 2
 
     loop_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
     if mode == "auto":
@@ -390,11 +393,17 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
     growth_stall_count = 0
     prev_decomposed_count = len(list_by_state(tree_path, DECOMPOSED))
 
+    plan_md = plan_md_path(cfg)
     for i in range(1, max_rounds + 1):
+        if check_stop_requested(cfg, log_both):
+            return 1
         rotate_log_if_needed(cfg)
         if lock_path:
             touch_run_lock(lock_path)
         sync_framework_docs(cfg, log_both)
+        if get_val(plan_md, "plan_human_required") == "true":
+            log_both("🧑‍⚖️ plan_human_required=true：已停下交人類裁決規劃書，loop 停止。")
+            return 2
 
         # ── 選目標節點 ──
         target = next_pending_node(tree_path)
@@ -530,6 +539,7 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
             if depth_violations:
                 log_both(f"  ⛔ 拆解深度超限（max_depth={brk_max_depth}）→ 凍結交人。"
                          f" 超標節點：{', '.join(depth_violations)}")
+                set_plan_human_required(plan_md, True, "tree_depth_limit_exceeded", f"拆解深度超限（max_depth={brk_max_depth}）。超標節點：{', '.join(depth_violations)}")
                 return 2
 
             # ── 硬 BREAKER：max_leaves（Chunk 7）──
@@ -537,6 +547,7 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
             leaf_count_total, exceeded = check_leaves_breaker(tree_path, brk_max_leaves)
             if exceeded:
                 log_both(f"  ⛔ 葉子總數超限（{leaf_count_total} > max_leaves={brk_max_leaves}）→ 凍結交人。")
+                set_plan_human_required(plan_md, True, "tree_leaves_limit_exceeded", f"葉子總數超限（{leaf_count_total} > max_leaves={brk_max_leaves}）")
                 return 2
 
             # 生長停滯歸零（有節點成功拆解 = 有進展）
@@ -554,6 +565,7 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
             log_both(f"  ⬆ 節點 [{target}] 連續 {rounds_since_progress} cycle 無進展 → 升級模型（{upgraded_tier}）。")
         elif node_stuck_level >= 1 and rounds_since_progress >= osc["stall_threshold"] + osc["enhanced_max_rounds"]:
             log_both(f"  ⛔ 節點 [{target}] 升級模型仍無進展 → 交人類裁決。")
+            set_plan_human_required(plan_md, True, "node_stuck_threshold_exceeded", f"節點 [{target}] 升級模型仍無進展")
             return 2
 
         # ── 硬 BREAKER：growth_stall_rounds（Chunk 7）──
@@ -567,6 +579,7 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
         if growth_stall_count >= brk_growth_stall:
             log_both(f"  ⛔ 樹生長停滯（連續 {growth_stall_count} cycle 無拆解進展，"
                      f"growth_stall_rounds={brk_growth_stall}）→ 凍結交人。")
+            set_plan_human_required(plan_md, True, "tree_growth_stalled", f"樹生長停滯（連續 {growth_stall_count} cycle 無拆解進展）")
             return 2
 
         append_round_record(cfg, {
@@ -594,7 +607,8 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
     # ── 完成後的出口 ──
     if not tree_planning_complete(tree_path):
         log_both(f"⛔ 樹規劃未在 {max_rounds} cycle 內完成，請人工檢視。")
-        return 1
+        set_plan_human_required(plan_md, True, "max_rounds_reached", f"樹規劃未在 {max_rounds} cycle 內完成")
+        return 2
 
     loop_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
     if mode == "auto":

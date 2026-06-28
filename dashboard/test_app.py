@@ -590,3 +590,100 @@ def test_collect_traces_pass_reset_and_streaks():
 
         # Pass reset rate: 1 reset (pass went 2→0 at round 3) out of 5 total rounds
         assert summary["metrics"]["pass_reset_rate"]["overall"] == round(1 / 5, 4)
+
+
+def test_stop_request_and_human_details():
+    from engine.state import check_stop_requested, set_human_required, set_plan_human_required, get_val
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # 1. Test check_stop_requested
+        state_dir = os.path.join(tmpdir, ".loop_state")
+        os.makedirs(state_dir, exist_ok=True)
+        cfg = {
+            "runtime": {
+                "state_dir": state_dir
+            },
+            "run_id": "test_run_123"
+        }
+        
+        # Initially False
+        assert check_stop_requested(cfg) is False
+        
+        # Create stop request file
+        stop_file = os.path.join(state_dir, "stop_requested")
+        with open(stop_file, "w") as f:
+            f.write("")
+        assert os.path.exists(stop_file)
+        
+        # Now True and file should be removed
+        assert check_stop_requested(cfg) is True
+        assert not os.path.exists(stop_file)
+        
+        # 2. Test YAML frontmatter auto insertion in set_val
+        control_path = os.path.join(tmpdir, "CONTROL.md")
+        with open(control_path, "w", encoding="utf-8") as f:
+            f.write("# Frontmatter\n```yaml\ncurrent_phase: 1\n```\n# End\n")
+            
+        # Key missing initially
+        assert get_val(control_path, "human_required_reason") is None
+        
+        # set_human_required sets reason and msg
+        set_human_required(control_path, True, "some_reason", "Some Message Detail")
+        assert get_val(control_path, "human_required") == "true"
+        assert get_val(control_path, "human_required_reason") == "some_reason"
+        assert get_val(control_path, "human_required_msg") == "Some Message Detail"
+        
+        # set_human_required False clears reasons
+        set_human_required(control_path, False)
+        assert get_val(control_path, "human_required") == "false"
+        assert get_val(control_path, "human_required_reason") == ""
+        assert get_val(control_path, "human_required_msg") == ""
+
+
+def test_dashboard_human_context_endpoint(monkeypatch):
+    from fastapi.testclient import TestClient
+    from dashboard.app import app
+    import subprocess
+    
+    # Mock subprocess.Popen to prevent background execution holding file locks
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: None)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_path = os.path.join(tmpdir, "my-repo")
+        os.makedirs(os.path.join(repo_path, ".loop", "default", ".loop_state"), exist_ok=True)
+        
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("# Loop 專案總覽（自動維護）\n\n")
+            f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
+            f.write("|------|------|-----------|-------|-------|------|------|\n")
+            f.write(f"| my-repo | {repo_path} | default | 1 | 0 | tracked | t |\n")
+            
+        control_path = os.path.join(repo_path, ".loop", "default", "CONTROL.md")
+        with open(control_path, "w", encoding="utf-8") as f:
+            f.write("# Control\n```yaml\ncurrent_phase: 1\nhuman_required: true\nhuman_required_reason: stuck_level_2_hard_stop\nhuman_required_msg: Stuck level 2 hit!\n```\n# End\n")
+            
+        monkeypatch.setattr("dashboard.app.get_index_path", lambda: index_path)
+        
+        projects = parse_index()
+        proj_id = projects[0]["id"]
+        
+        client = TestClient(app)
+        
+        # Call human-context API
+        r1 = client.get(f"/api/projects/{proj_id}/human-context")
+        assert r1.status_code == 200
+        data1 = r1.json()
+        assert data1["human_required"] is True
+        assert data1["reason"] == "Stuck level 2 hit!"
+        
+        # Test resume endpoint clears context reasons
+        r2 = client.post(f"/api/projects/{proj_id}/resume")
+        assert r2.status_code == 200
+        
+        # Check CONTROL.md was updated
+        with open(control_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "human_required: false" in content
+        assert "human_required_reason:" in content
+        assert "human_required_msg:" in content

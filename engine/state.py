@@ -30,14 +30,32 @@ def set_val(control: str, key: str, value: str):
     out, hit = [], False
     try:
         with open(control, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                m = pat.match(line.rstrip("\n"))
-                if m and not hit:
-                    comment = m.group(3) or ""
-                    out.append(f"{m.group(1)}{value}  {comment}".rstrip() + "\n")
-                    hit = True
-                else:
-                    out.append(line)
+            lines = f.readlines()
+            
+        for line in lines:
+            m = pat.match(line.rstrip("\n"))
+            if m and not hit:
+                comment = m.group(3) or ""
+                out.append(f"{m.group(1)}{value}  {comment}".rstrip() + "\n")
+                hit = True
+            else:
+                out.append(line)
+                
+        # If the key was not found, attempt to insert it within the ```yaml ... ``` block
+        if not hit:
+            in_yaml = False
+            insert_idx = -1
+            for idx, line in enumerate(out):
+                if line.strip() == "```yaml":
+                    in_yaml = True
+                elif line.strip() == "```" and in_yaml:
+                    insert_idx = idx
+                    break
+                    
+            if insert_idx != -1:
+                out.insert(insert_idx, f"{key}: {value}\n")
+                hit = True
+                
         if hit:
             with open(control, "w", encoding="utf-8") as f:
                 f.writelines(out)
@@ -139,4 +157,52 @@ def append_round_record(cfg: dict, record: dict) -> None:
             f.writelines(lines)
     except (OSError, TypeError, ValueError) as e:
         logger.warning(f"Failed to append round record: {e}")
+
+
+def check_stop_requested(cfg: dict, log_both=None) -> bool:
+    """檢查是否有優雅停機請求 (stop_requested)。
+    若有，則刪除該檔案、記錄日誌、寫入停機事件到 rounds.jsonl，並回傳 True。"""
+    from datetime import datetime
+    p = os.path.join(cfg["runtime"]["state_dir"], "stop_requested")
+    if os.path.exists(p):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+        msg = "✋ [Cooperative Stop] 偵測到協同式停機請求，正在優雅釋放資源並關閉..."
+        if log_both:
+            log_both(msg)
+        else:
+            print(msg, flush=True)
+            
+        append_round_record(cfg, {
+            "run_id": cfg.get("run_id"),
+            "ts": datetime.now().strftime("%F %T"),
+            "type": "stop_requested",
+            "message": "Cooperative stop requested by user."
+        })
+        return True
+    return False
+
+
+def set_human_required(control: str, required: bool, reason: str = "", msg: str = ""):
+    if required:
+        set_val(control, "human_required", "true")
+        set_val(control, "human_required_reason", reason)
+        set_val(control, "human_required_msg", msg)
+    else:
+        set_val(control, "human_required", "false")
+        set_val(control, "human_required_reason", "")
+        set_val(control, "human_required_msg", "")
+
+
+def set_plan_human_required(plan_md: str, required: bool, reason: str = "", msg: str = ""):
+    if required:
+        set_val(plan_md, "plan_human_required", "true")
+        set_val(plan_md, "plan_human_required_reason", reason)
+        set_val(plan_md, "plan_human_required_msg", msg)
+    else:
+        set_val(plan_md, "plan_human_required", "false")
+        set_val(plan_md, "plan_human_required_reason", "")
+        set_val(plan_md, "plan_human_required_msg", "")
 

@@ -74,14 +74,42 @@ def get_index_path():
 def get_control_val(control_path: str, key: str) -> str | None:
     if not os.path.exists(control_path):
         return None
-    import re
-    pat = re.compile(rf"^\s*{re.escape(key)}\s*:\s*(.*?)\s*$")
     try:
         with open(control_path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                m = pat.match(line)
-                if m:
-                    return m.group(1).split("#", 1)[0].strip().strip('"')
+            content = f.read()
+            
+        def norm(v):
+            if isinstance(v, bool):
+                return "true" if v else "false"
+            v_str = str(v).strip()
+            if v_str.lower() == "true":
+                return "true"
+            if v_str.lower() == "false":
+                return "false"
+            return v_str
+            
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                yaml_part = parts[1]
+                data = yaml.safe_load(yaml_part) or {}
+                val = data.get(key)
+                if val is not None:
+                    return norm(val)
+        if "```yaml" in content:
+            parts = content.split("```yaml", 1)[1].split("```", 1)
+            if len(parts) >= 2:
+                yaml_part = parts[0]
+                data = yaml.safe_load(yaml_part) or {}
+                val = data.get(key)
+                if val is not None:
+                    return norm(val)
+        import re
+        pat = re.compile(rf"^\s*{re.escape(key)}\s*:\s*(.*?)\s*$")
+        for line in content.splitlines():
+            m = pat.match(line)
+            if m:
+                return norm(m.group(1).split("#", 1)[0].strip().strip('"'))
     except Exception:
         pass
     return None
@@ -306,6 +334,12 @@ def parse_index():
                         r_done = get_control_val(control_path, "stop_condition_met")
                         r_last = get_control_val(control_path, "last_round_result")
                         
+                        plan_md = os.path.join(repo_path, ".loop", ws, "PLAN.md")
+                        if os.path.exists(plan_md):
+                            r_plan_human = get_control_val(plan_md, "plan_human_required")
+                            if r_plan_human == "true":
+                                r_human = "true"
+
                         if r_phase:
                             phase = r_phase
                         if r_stuck:
@@ -547,14 +581,28 @@ def get_human_context(proj_id: str):
     r_human = get_control_val(control_path, "human_required")
     is_human = (r_human == "true")
     
+    plan_md = os.path.join(proj["repo"], ".loop", proj["workspace"], "PLAN.md")
+    r_plan_human = get_control_val(plan_md, "plan_human_required")
+    is_plan_human = (r_plan_human == "true")
+    
+    is_any_human = is_human or is_plan_human
+    
     reason = ""
     log_excerpt = ""
-    if is_human:
-        log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "loop.log")
-        reason, log_excerpt = extract_human_context(log_path)
+    if is_any_human:
+        if is_human:
+            reason = get_control_val(control_path, "human_required_msg") or get_control_val(control_path, "human_required_reason") or ""
+        else:
+            reason = get_control_val(plan_md, "plan_human_required_msg") or get_control_val(plan_md, "plan_human_required_reason") or ""
+            
+        if not reason:
+            log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "loop.log")
+            if is_plan_human and os.path.exists(os.path.join(proj["repo"], ".loop", proj["workspace"], "plan.log")):
+                log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "plan.log")
+            reason, log_excerpt = extract_human_context(log_path)
         
     return {
-        "human_required": is_human,
+        "human_required": is_any_human,
         "reason": reason,
         "log_excerpt": log_excerpt
     }
@@ -584,6 +632,14 @@ def resume_project(proj_id: str):
         pass
 
     set_control_val(control_path, "human_required", "false")
+    set_control_val(control_path, "human_required_reason", "")
+    set_control_val(control_path, "human_required_msg", "")
+    
+    plan_md = os.path.join(proj["repo"], ".loop", proj["workspace"], "PLAN.md")
+    if os.path.exists(plan_md):
+        set_control_val(plan_md, "plan_human_required", "false")
+        set_control_val(plan_md, "plan_human_required_reason", "")
+        set_control_val(plan_md, "plan_human_required_msg", "")
     
     lock_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "run.lock")
     if os.path.exists(lock_path):
@@ -1200,15 +1256,41 @@ def get_control_val(control_path: str, key: str) -> str | None:
     if not os.path.exists(control_path):
         return None
     try:
-        with open(control_path, "r", encoding="utf-8") as f:
+        with open(control_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
+            
+        def norm(v):
+            if isinstance(v, bool):
+                return "true" if v else "false"
+            v_str = str(v).strip()
+            if v_str.lower() == "true":
+                return "true"
+            if v_str.lower() == "false":
+                return "false"
+            return v_str
+            
         if content.startswith("---"):
             parts = content.split("---", 2)
             if len(parts) >= 3:
                 yaml_part = parts[1]
                 data = yaml.safe_load(yaml_part) or {}
                 val = data.get(key)
-                return str(val).strip() if val is not None else None
+                if val is not None:
+                    return norm(val)
+        if "```yaml" in content:
+            parts = content.split("```yaml", 1)[1].split("```", 1)
+            if len(parts) >= 2:
+                yaml_part = parts[0]
+                data = yaml.safe_load(yaml_part) or {}
+                val = data.get(key)
+                if val is not None:
+                    return norm(val)
+        import re
+        pat = re.compile(rf"^\s*{re.escape(key)}\s*:\s*(.*?)\s*$")
+        for line in content.splitlines():
+            m = pat.match(line)
+            if m:
+                return norm(m.group(1).split("#", 1)[0].strip().strip('"'))
     except Exception:
         pass
     return None
