@@ -1081,35 +1081,72 @@ def get_activity(proj_id: str, limit: int = 50):
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "loop.log")
-    if not os.path.exists(log_path):
+    rounds_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "rounds.jsonl")
+    if not os.path.exists(rounds_path):
         return []
         
-    lines = get_last_n_lines(log_path, 600)
+    import json
     events = []
     
-    for line in reversed(lines):
-        line_str = line.strip()
-        if not line_str:
-            continue
-            
-        matched_type = None
-        for act_type, check_fn in ACTIVITY_CLASSIFICATION_RULES:
-            if check_fn(line_str):
-                matched_type = act_type
-                break
+    try:
+        with open(rounds_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    record = json.loads(line_str)
+                except Exception:
+                    continue
                 
-        if matched_type:
-            ts, text = parse_timestamp(line_str)
-            events.append({
-                "ts": ts,
-                "type": matched_type,
-                "text": text
-            })
-            if len(events) >= limit:
-                break
+                rec_type = record.get("type", "round_finished")
+                ts = record.get("ts", "")
                 
-    return events
+                if rec_type == "loop_complete":
+                    events.append({
+                        "ts": ts,
+                        "type": "complete",
+                        "text": f"🎉 {record.get('message', 'LOOP COMPLETE')}"
+                    })
+                elif rec_type == "review_revert":
+                    events.append({
+                        "ts": ts,
+                        "type": "review_revert",
+                        "text": f"🚨 {record.get('message', 'Git Review Gate reverted changes')}"
+                    })
+                elif rec_type == "human_required":
+                    events.append({
+                        "ts": ts,
+                        "type": "human_required",
+                        "text": f"⛔ {record.get('message', 'Human intervention required')}"
+                    })
+                elif rec_type == "round_finished":
+                    # Stuck upgrade
+                    if record.get("stuck_level", 0) > 0:
+                        events.append({
+                            "ts": ts,
+                            "type": "model_upgrade",
+                            "text": f"⬆️ Stuck level {record.get('stuck_level')} -> Model escalated ({record.get('model_tier')})"
+                        })
+                    # Progress / Convergence
+                    if record.get("progressed"):
+                        if record.get("loop_type") == "tree" and record.get("leaf"):
+                            events.append({
+                                "ts": ts,
+                                "type": "leaf_converged",
+                                "text": f"🍃 Leaf [{record.get('leaf')}] converged"
+                            })
+                        else:
+                            events.append({
+                                "ts": ts,
+                                "type": "progress",
+                                "text": f"↩️ Progress made in Phase {record.get('phase')}"
+                            })
+    except Exception as e:
+        print(f"Error reading rounds.jsonl: {e}")
+        
+    # Return the most recent events up to the limit
+    return list(reversed(events))[:limit]
 
 import fnmatch
 
@@ -1159,6 +1196,23 @@ def get_project_doc(proj_id: str, path: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
 
+def get_control_val(control_path: str, key: str) -> str | None:
+    if not os.path.exists(control_path):
+        return None
+    try:
+        with open(control_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                yaml_part = parts[1]
+                data = yaml.safe_load(yaml_part) or {}
+                val = data.get(key)
+                return str(val).strip() if val is not None else None
+    except Exception:
+        pass
+    return None
+
 @app.get("/api/projects/{proj_id}/diff")
 def get_project_diff(proj_id: str):
     proj = get_project_by_id(proj_id)
@@ -1168,14 +1222,8 @@ def get_project_diff(proj_id: str):
     repo = proj["repo"]
     ws = proj["workspace"]
     
-    sha_path = os.path.join(repo, ".loop", ws, ".loop_state", "last_safe_sha")
-    base_sha = None
-    if os.path.exists(sha_path):
-        try:
-            with open(sha_path, "r", encoding="utf-8") as sf:
-                base_sha = sf.read().strip()
-        except Exception:
-            pass
+    control_path = os.path.join(repo, ".loop", ws, "CONTROL.md")
+    base_sha = get_control_val(control_path, "last_safe_sha")
             
     head_sha = None
     try:

@@ -200,6 +200,7 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
             append_round_record(cfg, {
                 "run_id": run_id,
                 "ts": datetime.now().strftime("%F %T"),
+                "type": "round_finished",
                 "round": i,
                 "loop_type": "plan",
                 "phase": "plan",
@@ -277,6 +278,7 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
         append_round_record(cfg, {
             "run_id": run_id,
             "ts": datetime.now().strftime("%F %T"),
+            "type": "round_finished",
             "round": i,
             "loop_type": "plan",
             "phase": "plan",
@@ -448,6 +450,7 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
             append_round_record(cfg, {
                 "run_id": run_id,
                 "ts": datetime.now().strftime("%F %T"),
+                "type": "round_finished",
                 "round": i,
                 "loop_type": "plan",
                 "phase": "plan",
@@ -569,6 +572,7 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
         append_round_record(cfg, {
             "run_id": run_id,
             "ts": datetime.now().strftime("%F %T"),
+            "type": "round_finished",
             "round": i,
             "loop_type": "plan",
             "phase": "plan",

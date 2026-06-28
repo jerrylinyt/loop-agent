@@ -52,40 +52,57 @@ def as_int(v, d=0) -> int:
         return d
 
 
-# ─────────────── 震盪歷史持久化（重啟接續，不歸零） ───────────────
-def fail_history_path(cfg: dict) -> str:
-    return os.path.join(cfg["runtime"]["state_dir"], "fail_history")
-
-
-def load_fail_history(cfg: dict, maxlen: int) -> deque:
+# ─────────────── 歷史與進度重建（從 rounds.jsonl 讀取） ───────────────
+def reconstruct_history_and_progress(cfg: dict, maxlen: int) -> tuple:
+    """從 rounds.jsonl 重建震盪歷史 (fail_history) 及進度特徵 (progress)。
+    讀取最近的歷史紀錄來還原上一次中斷時的記憶體狀態。"""
+    from collections import deque
     dq = deque(maxlen=maxlen)
-    p = fail_history_path(cfg)
+    progress = {}
+    p = rounds_log_path(cfg)
     if os.path.exists(p):
         try:
             with open(p, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if line:
-                        dq.append(line)
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    # 1. 僅根據類型為 round_finished 或預設無 type 的執行輪重建進度
+                    if record.get("type", "round_finished") == "round_finished":
+                        progress = {
+                            "sig": record.get("progress_sig") or "",
+                            "idle": str(record.get("idle_rounds") or 0),
+                            "killed_streak": str(record.get("killed_streak") or 0),
+                            "phase": str(record.get("phase") or ""),
+                            "last_pass": str(record.get("consecutive_pass") or 0)
+                        }
+                        
+                        # 2. 重建震盪指紋佇列
+                        # 只有客觀驗證失敗才會有指紋
+                        mode = record.get("mode") or ""
+                        result = record.get("result") or ""
+                        is_fail_verify = (not record.get("killed")) and ("驗證" in mode) and (result == "FAIL")
+                        if is_fail_verify:
+                            fp = record.get("fail_fingerprint")
+                            if fp:
+                                dq.append(fp)
+                        
+                        # 若該輪有進展，清空之前的失敗佇列
+                        if record.get("progressed"):
+                            dq.clear()
         except OSError as e:
-            logger.warning(f"Failed to load fail history: {e}")
-    return dq
+            logger.warning(f"Failed to reconstruct history and progress from rounds.jsonl: {e}")
+    return dq, progress
 
 
-def save_fail_history(cfg: dict, dq: deque):
-    p = fail_history_path(cfg)
-    try:
-        os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-        with open(p, "w", encoding="utf-8") as f:
-            f.write("\n".join(dq) + ("\n" if dq else ""))
-    except OSError as e:
-        logger.error(f"Failed to save fail history: {e}")
-
-
-# ─── 進度/活動持久化（跨 phase 正確判進展 + 無活動偵測；重啟接續，不歸零） ───
 def progress_signature(cfg: dict, control: str) -> str:
     """本輪『活動簽章』= current_phase + 各 phase consecutive_pass 總和 + HEAD commit。
     連續多輪簽章不變 = agent 沒提交任何東西、計數器也沒動（空轉/反覆被 watchdog 中斷/CLI 壞掉）。"""
+    from git_utils import git_head
     phase = get_val(control, "current_phase") or ""
     total_pass = 0
     for ph in (cfg.get("phases") or []):
@@ -93,48 +110,33 @@ def progress_signature(cfg: dict, control: str) -> str:
     return f"{phase}|{total_pass}|{git_head()}"
 
 
-def progress_path(cfg: dict) -> str:
-    return os.path.join(cfg["runtime"]["state_dir"], "progress")
-
-
-def load_progress(cfg: dict) -> dict:
-    data = {}
-    p = progress_path(cfg)
-    if os.path.exists(p):
-        try:
-            with open(p, encoding="utf-8") as f:
-                for line in f:
-                    if ":" in line:
-                        k, v = line.split(":", 1)
-                        data[k.strip()] = v.strip()
-        except OSError as e:
-            logger.warning(f"Failed to load progress: {e}")
-    return data
-
-
-def save_progress(cfg: dict, **kw):
-    p = progress_path(cfg)
-    try:
-        os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-        with open(p, "w", encoding="utf-8") as f:
-            for k, v in kw.items():
-                f.write(f"{k}: {v}\n")
-    except OSError as e:
-        logger.error(f"Failed to save progress: {e}")
-
-
 def rounds_log_path(cfg: dict) -> str:
     return os.path.join(cfg["runtime"]["state_dir"], "rounds.jsonl")
 
 
 def append_round_record(cfg: dict, record: dict) -> None:
-    """Append 一行逐輪紀錄到 rounds.jsonl。Best-effort：失敗只記 warning，絕不中斷主迴圈。"""
+    """Append 一行逐輪紀錄到 rounds.jsonl，並限制最多保留 100 筆紀錄。
+    Best-effort：失敗只記 warning，絕不中斷主迴圈。"""
     p = rounds_log_path(cfg)
     try:
         os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-        line = json.dumps(record, ensure_ascii=False)
-        with open(p, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        
+        # 讀取現有紀錄
+        lines = []
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                lines = [l for l in f if l.strip()]
+                
+        # 新增此輪紀錄
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        lines.append(line)
+        
+        # 保留最後 100 筆
+        if len(lines) > 100:
+            lines = lines[-100:]
+            
+        with open(p, "w", encoding="utf-8") as f:
+            f.writelines(lines)
     except (OSError, TypeError, ValueError) as e:
         logger.warning(f"Failed to append round record: {e}")
 

@@ -109,8 +109,9 @@ def main():
             logger.warning(f"Rounds log not found: {rounds_path}, skipping.")
             continue
 
-        # Load fail_history for this workspace
-        workspace_fail_histories[ws_key] = load_fail_history(state_dir)
+        # Load fail_history for this workspace (first collect from rounds.jsonl, fallback to file if empty)
+        fingerprints = []
+        workspace_fail_histories[ws_key] = fingerprints
 
         # Parse rounds.jsonl
         try:
@@ -126,6 +127,11 @@ def main():
                         record["ws"] = ws["workspace"]
                         record["repo_path"] = ws["repo_path"]
                         
+                        # Extract fail fingerprint if exists
+                        fp = record.get("fail_fingerprint")
+                        if fp:
+                            fingerprints.append(fp)
+                        
                         # Apply --since filter if provided
                         if args.since:
                             ts_val = record.get("ts", "")
@@ -140,6 +146,10 @@ def main():
                             workspace_latest_run[ws_key] = run_id
                     except json.JSONDecodeError as je:
                         logger.warning(f"Malformed JSON on line {line_idx} in {rounds_path}: {je}")
+            
+            # Fallback to loading fail_history from file if no fingerprints were extracted from rounds.jsonl
+            if not fingerprints:
+                workspace_fail_histories[ws_key] = load_fail_history(state_dir)
         except Exception as e:
             logger.error(f"Error reading rounds in {rounds_path}: {e}")
 
@@ -206,7 +216,7 @@ def main():
     # 3.3 Oscillation hotspots
     fingerprint_map = {}  # fp -> { "repos": set, "runs": set, "count": int }
     for ws_key, fingerprints in workspace_fail_histories.items():
-        repo_name = os.path.basename(os.path.normpath(ws_key.split(":")[0]))
+        repo_name = os.path.basename(os.path.normpath(ws_key.rsplit(":", 1)[0]))
         latest_run = workspace_latest_run.get(ws_key)
         for fp in fingerprints:
             if fp not in fingerprint_map:

@@ -16,8 +16,8 @@ import logging
 from datetime import datetime
 
 from config import load_config, fmt_prompt, select_model, model_tier_label
-from git_utils import inspect_and_fix_blank, git_guard, expand_control_files
-from state import get_val, set_val, as_int, load_fail_history, save_fail_history, progress_signature, load_progress, save_progress, append_round_record
+from git_utils import inspect_and_fix_blank, git_guard, expand_control_files, changed_files, git_head
+from state import get_val, set_val, as_int, progress_signature, append_round_record, reconstruct_history_and_progress
 from agent_runner import build_cmd, run_agent
 from utils import (
     WorkspaceBusy, acquire_run_lock, release_run_lock, touch_run_lock, lock_stale_seconds,
@@ -78,11 +78,10 @@ def _review_has_checklist(text: str) -> bool:
     return len(item_lines) >= 6 or len(tokens) >= 6
 
 
-def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
+def run_git_review_gate(cfg: dict, control: str, log_both) -> tuple[bool, bool]:
     """獨立的 Git Review Gate：審查 last_safe_sha 到 HEAD 的 Diff。
     回傳 (通過與否, 是否因人類干預而需停機)。"""
     state_dir = cfg["runtime"]["state_dir"]
-    safe_sha_file = os.path.join(state_dir, "last_safe_sha")
     
     # 取得目前的 HEAD
     res = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True)
@@ -91,15 +90,11 @@ def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
     current_head = res.stdout.strip()
     
     # 讀取 last_safe_sha
-    last_safe_sha = ""
-    if os.path.exists(safe_sha_file):
-        with open(safe_sha_file, "r", encoding="utf-8") as f:
-            last_safe_sha = f.read().strip()
+    last_safe_sha = get_val(control, "last_safe_sha") or ""
             
     if not last_safe_sha:
         # 第一次執行，將目前的 HEAD 當作基準
-        with open(safe_sha_file, "w", encoding="utf-8") as f:
-            f.write(current_head)
+        set_val(control, "last_safe_sha", current_head)
         return True, False
         
     if last_safe_sha == current_head:
@@ -108,8 +103,7 @@ def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
     res = subprocess.run(["git", "diff", last_safe_sha, current_head], capture_output=True, text=True)
     diff = res.stdout.strip()
     if not diff:
-        with open(safe_sha_file, "w", encoding="utf-8") as f:
-            f.write(current_head)
+        set_val(control, "last_safe_sha", current_head)
         return True, False
         
     log_both("  🔍 [Git Review Gate] 啟動，審查未驗證的 Commit...")
@@ -151,21 +145,11 @@ def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
             output = f.read()
 
     # 連續無效審查計數（fail-closed 後若審查 agent 始終產不出合規判決,需有界升級交人,避免無限重審）
-    invalid_streak_file = os.path.join(state_dir, "review_invalid_streak")
-
     def _read_streak() -> int:
-        try:
-            with open(invalid_streak_file, encoding="utf-8") as f:
-                return int(f.read().strip() or "0")
-        except (OSError, ValueError):
-            return 0
+        return as_int(get_val(control, "review_invalid_streak"))
 
     def _write_streak(n: int):
-        try:
-            with open(invalid_streak_file, "w", encoding="utf-8") as f:
-                f.write(str(n))
-        except OSError:
-            pass
+        set_val(control, "review_invalid_streak", str(n))
 
     if "[REVIEW: REVERT]" in output or "[REVIEW: FATAL_STATE]" in output:
         _write_streak(0)
@@ -187,6 +171,12 @@ def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
         if has_human_commits(last_safe_sha, current_head):
             log_both("  🚨 [致命衝突] 偵測到人類 Commit 與 Agent 壞 Code 交錯！")
             log_both("  為保護人類心血，停止自動 Revert，請手動修復後重新啟動。")
+            append_round_record(cfg, {
+                "run_id": cfg.get("run_id"),
+                "ts": datetime.now().strftime("%F %T"),
+                "type": "human_required",
+                "message": f"Git Review Gate human conflict: {reason}"
+            })
             return False, True
 
         log_both("  (全為自動提交) 執行自動 Revert...")
@@ -195,7 +185,20 @@ def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
             subprocess.run(["git", "revert", "--abort"])
             log_both("  🚨 [Revert 失敗] 自動 Revert 發生衝突無法完成（可能與更早改動衝突）！")
             log_both("  為保護專案，停止執行，請手動處理衝突後重新啟動。")
+            append_round_record(cfg, {
+                "run_id": cfg.get("run_id"),
+                "ts": datetime.now().strftime("%F %T"),
+                "type": "review_revert",
+                "message": f"Git Revert failed due to merge conflicts: {reason}"
+            })
             return False, True
+            
+        append_round_record(cfg, {
+            "run_id": cfg.get("run_id"),
+            "ts": datetime.now().strftime("%F %T"),
+            "type": "review_revert",
+            "message": f"Git Review Gate reverted changes. Reason: {reason}"
+        })
         return False, False
 
     # ── fail-closed（稽核 #7）：必須有【明確 [REVIEW: PASS]】+【逐條紅線清單】才放行。──
@@ -204,8 +207,7 @@ def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
     has_checklist = _review_has_checklist(output)
     if has_pass and has_checklist:
         _write_streak(0)
-        with open(safe_sha_file, "w", encoding="utf-8") as f:
-            f.write(current_head)
+        set_val(control, "last_safe_sha", current_head)
         log_both("  ✅ [Git Review Gate] 審查通過。")
         return True, False
 
@@ -218,6 +220,12 @@ def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
     if streak >= limit:
         log_both(f"  ⛔ 連續 {streak} 次無法產出合規審查判決 → 停下交人類。")
         _write_streak(0)
+        append_round_record(cfg, {
+            "run_id": cfg.get("run_id"),
+            "ts": datetime.now().strftime("%F %T"),
+            "type": "human_required",
+            "message": f"Git Review Gate failed to produce valid verdict {streak} times consecutively."
+        })
         return False, True
     # 不前進 last_safe_sha；本輪跳過執行,下一輪重審同一 diff。
     return False, False
@@ -260,7 +268,6 @@ def update_stuck_state(cfg: dict, control: str, log_both, *, fail_history, progr
     if progressed:
         rounds_since = 0
         fail_history.clear()
-        save_fail_history(cfg, fail_history)
         if stuck_level != 0:
             role_tier = model_tier_label(cfg, "execute", 0)
             log_both(f"  ↩ 有進展，stuck 解除、換回角色預設模型（{role_tier}）。")
@@ -270,7 +277,6 @@ def update_stuck_state(cfg: dict, control: str, log_both, *, fail_history, progr
     elif is_fail_verify:
         rounds_since += 1
         fail_history.append(fail_fingerprint(control))
-        save_fail_history(cfg, fail_history)
         if stuck_level == 1:
             enhanced_used += 1
     elif no_activity and stuck_level == 1:
@@ -300,8 +306,6 @@ def update_stuck_state(cfg: dict, control: str, log_both, *, fail_history, progr
         log_both(f"  ⛔ {leaf_label}升級人類後仍{why}（硬性保險觸發）→ 停下交人類。")
         set_val(control, "stuck_level", "2")
         set_val(control, "rounds_since_progress", str(rounds_since))
-        save_progress(cfg, sig=sig, idle=idle_rounds, killed_streak=killed_streak,
-                      phase=phase, last_pass=cur_pass)
         hard_stop = True
 
     out = {
@@ -316,7 +320,6 @@ def update_stuck_state(cfg: dict, control: str, log_both, *, fail_history, progr
     set_val(control, "enhanced_rounds_used", str(enhanced_used))
     new_progress = {"sig": sig, "idle": idle_rounds, "killed_streak": killed_streak,
                      "phase": phase, "last_pass": cur_pass}
-    save_progress(cfg, **new_progress)
     out["progress"] = new_progress
     return out
 
@@ -356,10 +359,22 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
     ws_name = cfg["workspace"]
     start_epoch = int(time.time())
     run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
+    cfg["run_id"] = run_id
 
     rt = cfg["runtime"]
     control = cfg["control"]
     osc = cfg["oscillation"]
+    
+    # Log run_started event
+    append_round_record(cfg, {
+        "run_id": run_id,
+        "ts": datetime.now().strftime("%F %T"),
+        "type": "run_started",
+        "payload": {
+            "mode": cfg.get("generation", {}).get("mode", "gated"),
+            "stage": "execute"
+        }
+    })
     log_path = rt["log_file"]
 
     def hb(msg=""):
@@ -401,12 +416,11 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
 
     state_dir = rt["state_dir"]
     os.makedirs(state_dir, exist_ok=True)
-    fail_history = load_fail_history(cfg, osc["osc_window"])  # 持久化：重啟接續，不歸零
+    fail_history, progress = reconstruct_history_and_progress(cfg, osc["osc_window"])
     if fail_history:
-        log_both(f"  ↺ 從 .loop_state 接續震盪歷史（{len(fail_history)} 筆）。")
-    progress = load_progress(cfg)        # 持久化：跨重啟正確判進展 + 無活動偵測,不歸零
+        log_both(f"  ↺ 從 rounds.jsonl 接續震盪歷史（{len(fail_history)} 筆）。")
     if progress:
-        log_both(f"  ↺ 從 .loop_state 接續進度標記（idle={progress.get('idle', '0')}）。")
+        log_both(f"  ↺ 從 rounds.jsonl 接續進度標記（idle={progress.get('idle', '0')}）。")
 
     for i in range(1, rt["max_rounds"] + 1):
         rotate_log_if_needed(cfg)
@@ -418,7 +432,7 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             touch_run_lock(lock_path)    # 鎖心跳：長跑時不被誤判殘留而被搶鎖
         sync_framework_docs(cfg, log_both)
 
-        passed, human_conflict = run_git_review_gate(cfg, log_both)
+        passed, human_conflict = run_git_review_gate(cfg, control, log_both)
         if human_conflict:
             set_val(control, "human_required", "true")
             log_both("🧑‍⚖️ 偵測到 human_required：因人類與 Agent 衝突，loop 停止。")
@@ -430,9 +444,21 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         if os.path.exists(control):
             if is_done(cfg, control):
                 log_both(f"✅ 停止條件成立，於第 {i-1} 輪後完成。LOOP COMPLETE")
+                append_round_record(cfg, {
+                    "run_id": run_id,
+                    "ts": datetime.now().strftime("%F %T"),
+                    "type": "loop_complete",
+                    "message": f"停止條件成立，於第 {i-1} 輪後完成。"
+                })
                 return 0
             if human_needed(cfg, control):
                 log_both("🧑‍⚖️ 偵測到 human_required：已凍結互卡任務，需你介入裁決。loop 停止。")
+                append_round_record(cfg, {
+                    "run_id": run_id,
+                    "ts": datetime.now().strftime("%F %T"),
+                    "type": "human_required",
+                    "message": "已凍結互卡任務，需你介入裁決。"
+                })
                 return 2
 
         stuck_level = as_int(get_val(control, "stuck_level"))
@@ -467,9 +493,20 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             return 2
 
         progress = upd["progress"]   # 同步記憶體,供下一輪比對
+        
+        last_safe_sha = get_val(control, "last_safe_sha") or ""
+        current_head = git_head()
+        
+        # Oscillation fingerprint tracking
+        fail_fp = None
+        is_fail_verify = (not killed) and ("驗證" in mode) and (result == "FAIL")
+        if is_fail_verify:
+            fail_fp = fail_fingerprint(control)
+            
         append_round_record(cfg, {
             "run_id": run_id,
             "ts": datetime.now().strftime("%F %T"),
+            "type": "round_finished",
             "round": i,
             "loop_type": "execute",
             "phase": phase,
@@ -484,11 +521,27 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             "consecutive_pass": cur_pass,
             "progressed": upd["progressed"],
             "model_tier": tier,
+            "progress_sig": progress.get("sig") or "",
+            "idle_rounds": as_int(progress.get("idle")),
+            "killed_streak": as_int(progress.get("killed_streak")),
+            "fail_fingerprint": fail_fp,
+            "artifacts": {
+                "changed_files": changed_files(),
+                "git_head_before": last_safe_sha,
+                "git_head_after": current_head,
+                "commit": current_head,
+            }
         })
 
         time.sleep(rt["interval_seconds"])
 
     log_both(f"⛔ 已達 max_rounds={rt['max_rounds']}，停止（尚未完成，請檢查 {control}）。")
+    append_round_record(cfg, {
+        "run_id": run_id,
+        "ts": datetime.now().strftime("%F %T"),
+        "type": "run_finished",
+        "message": f"已達 max_rounds={rt['max_rounds']}，停止（尚未完成）。"
+    })
     return 1
 
 
@@ -503,10 +556,22 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
     ws_name = cfg["workspace"]
     start_epoch = int(time.time())
     run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
+    cfg["run_id"] = run_id
 
     rt = cfg["runtime"]
     control = cfg["control"]
     osc = cfg["oscillation"]
+    
+    # Log run_started event
+    append_round_record(cfg, {
+        "run_id": run_id,
+        "ts": datetime.now().strftime("%F %T"),
+        "type": "run_started",
+        "payload": {
+            "mode": cfg.get("generation", {}).get("mode", "gated"),
+            "stage": "execute"
+        }
+    })
     breaker = cfg.get("breaker", {})
     # ── 硬 BREAKER：max_leaf_reflow（Chunk 7 三條硬 BREAKER 之一）──
     # 單葉被整合打回超過 R 次 = 跨層垂直震盪，撞線即凍結交人。
@@ -552,8 +617,11 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
 
     state_dir = rt["state_dir"]
     os.makedirs(state_dir, exist_ok=True)
-    fail_history = load_fail_history(cfg, osc["osc_window"])
-    progress = load_progress(cfg)
+    fail_history, progress = reconstruct_history_and_progress(cfg, osc["osc_window"])
+    if fail_history:
+        log_both(f"  ↺ 從 rounds.jsonl 接續震盪歷史（{len(fail_history)} 筆）。")
+    if progress:
+        log_both(f"  ↺ 從 rounds.jsonl 接續進度標記（idle={progress.get('idle', '0')}）。")
 
     current_leaf = None
 
@@ -568,7 +636,7 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         sync_framework_docs(cfg, log_both)
 
         # ── 獨立 Git Review Gate：審查上一輪 commit，破壞性改動自動 revert（與平模式一致，稽核 #2）──
-        passed, human_conflict = run_git_review_gate(cfg, log_both)
+        passed, human_conflict = run_git_review_gate(cfg, control, log_both)
         if human_conflict:
             set_val(control, "human_required", "true")
             log_both("🧑‍⚖️ 偵測到 human_required：Git Review Gate 判定需人類介入，loop 停止。")
@@ -585,8 +653,20 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                 root_id = get_val(tree_path, "tree_root")
                 if root_id and all_children_converged(tree_path, root_id):
                     log_both(f"✅ 樹的所有節點已收斂，於第 {i-1} 輪後完成。TREE EXECUTE COMPLETE")
+                    append_round_record(cfg, {
+                        "run_id": run_id,
+                        "ts": datetime.now().strftime("%F %T"),
+                        "type": "loop_complete",
+                        "message": f"樹的所有節點已收斂，於第 {i-1} 輪後完成。"
+                    })
                     return 0
                 log_both("⚠️ 無可執行葉子但樹未完成 → 停下交人。")
+                append_round_record(cfg, {
+                    "run_id": run_id,
+                    "ts": datetime.now().strftime("%F %T"),
+                    "type": "human_required",
+                    "message": "無可執行葉子但樹未完成。"
+                })
                 return 2
 
         node = get_node(tree_path, current_leaf)
@@ -605,6 +685,12 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                 continue
             if human_needed(cfg, control):
                 log_both("🧑‍⚖️ 偵測到 human_required → 停下交人。")
+                append_round_record(cfg, {
+                    "run_id": run_id,
+                    "ts": datetime.now().strftime("%F %T"),
+                    "type": "human_required",
+                    "message": "偵測到 human_required。"
+                })
                 return 2
 
         stuck_level = as_int(get_val(control, "stuck_level"))
@@ -640,9 +726,20 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             return 2
 
         progress = upd["progress"]
+        
+        last_safe_sha = get_val(control, "last_safe_sha") or ""
+        current_head = git_head()
+        
+        # Oscillation fingerprint tracking
+        fail_fp = None
+        is_fail_verify = (not killed) and ("驗證" in mode) and (result == "FAIL")
+        if is_fail_verify:
+            fail_fp = fail_fingerprint(control)
+            
         append_round_record(cfg, {
             "run_id": run_id,
             "ts": datetime.now().strftime("%F %T"),
+            "type": "round_finished",
             "round": i,
             "loop_type": "tree",
             "phase": phase,
@@ -657,6 +754,16 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             "consecutive_pass": cur_pass,
             "progressed": upd["progressed"],
             "model_tier": tier,
+            "progress_sig": progress.get("sig") or "",
+            "idle_rounds": as_int(progress.get("idle")),
+            "killed_streak": as_int(progress.get("killed_streak")),
+            "fail_fingerprint": fail_fp,
+            "artifacts": {
+                "changed_files": changed_files(),
+                "git_head_before": last_safe_sha,
+                "git_head_after": current_head,
+                "commit": current_head,
+            }
         })
 
         # ── 回流偵測：agent 寫 CONTROL 欄位觸發 ──
@@ -700,7 +807,6 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             set_val(control, "enhanced_rounds_used", "0")
             set_val(control, "rounds_since_progress", "0")
             fail_history.clear()
-            save_fail_history(cfg, fail_history)
 
             rc = _tree_try_unlock(cfg, tree_path, current_leaf, max_leaf_reflow, log_both)
             if rc is not None:
@@ -711,6 +817,12 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         time.sleep(rt["interval_seconds"])
 
     log_both(f"⛔ 已達 max_rounds={rt['max_rounds']}，停止。")
+    append_round_record(cfg, {
+        "run_id": cfg.get("run_id"),
+        "ts": datetime.now().strftime("%F %T"),
+        "type": "run_finished",
+        "message": f"已達 max_rounds={rt['max_rounds']}，停止。"
+    })
     return 1
 
 
@@ -730,6 +842,12 @@ def _tree_try_unlock(cfg, tree_path, leaf_id, max_leaf_reflow, log_both) -> int 
     if parent_id == root_id:
         if all_children_converged(tree_path, root_id):
             log_both(f"✅ 根節點 [{root_id}] 所有子都已收斂。TREE EXECUTE COMPLETE")
+            append_round_record(cfg, {
+                "run_id": cfg.get("run_id"),
+                "ts": datetime.now().strftime("%F %T"),
+                "type": "loop_complete",
+                "message": f"根節點 [{root_id}] 所有子都已收斂。TREE EXECUTE COMPLETE"
+            })
             return 0
     else:
         grandparent_id = try_unlock_parent(tree_path, parent_id)
