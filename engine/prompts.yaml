@@ -68,8 +68,14 @@ tree_decompose: |
          用任務的自然單位切，例如：
            · 要移植 20 隻 API → 一隻 API 一個 leaf（共 20 個）。
            · 要建 20 個前端 component → 一個 component 一個 leaf。
-           · 要建共用 component → base 自己一個 leaf，之後每個變體各一個 leaf。
-         一個子項若「涵蓋不只一個這種自然單位」或「無法被單獨驗證」就標 pending，留下一輪再拆。
+           · 共用介面/型別/schema → 抽成一個【先行 leaf】，依賴它的子項各一個 leaf 且 depends_on 它
+             （「base 元件 + 各變體」就是此通則的特例）。
+         切法鐵則：
+           · 【可獨立驗證是硬條件】：若你寫不出「能對這一片單獨判 pass/fail 的檢查」，它就不是 leaf——
+             要嘛跟讓它可驗的東西合併，要嘛配個 stub/harness。切得開但驗不動 = 切壞了。
+           · 【垂直薄片 > 水平分層】：把功能切成「一條端到端、自己能跑能驗的薄片」，
+             不要切成「全部 DB 層／全部 API 層／全部 UI 層」——分層的每片單獨不會動，整合風險全擠到最後一次爆炸。
+         一個子項若「涵蓋不只一個自然單位」「無法被單獨驗證」或「同質假設不成立（混進特例邏輯）」→ 標 pending，留下一輪再拆。
       尺寸只是輔助煙霧偵測、不是切割準則：若某 leaf 預估遠超 ≤{max_files} 檔 / ≤{max_lines} 行，
       回頭確認「它是不是其實包了不只一個自然單位」；但若確為【單一自然單位】（如一隻較大的 API 移植），
       即使略超門檻仍維持 leaf——❌ 不要為了壓行數把一個內聚單位硬切兩半。
@@ -80,6 +86,13 @@ tree_decompose: |
     - 節點層級填 integration_contract = 這些子項「兜起來」必須共同遵守的介面/契約（一段文字）：
       例如 base component 對外的 props/型別/事件，或各 API 共用的 request/response schema、共用資料形狀。
       讓做下游子項的後續輪有明確介面可依循、整合驗證有對照基準。若子項彼此完全獨立、無共用介面，填「無共用契約（彼此獨立）」。
+  🚨 拆解前自檢三個常見陷阱（會造成「各自正確、兜起來衝突」）：
+    1. 假獨立：N 個看似獨立的 leaf 是否其實都要改【同一個共用檔】（router 註冊、shared types、同一份 migration）？
+       是 → 把該共用檔抽成先行 leaf（大家 depends_on 它）或讓每片只動自己的檔，並寫進 integration_contract。
+       （這種衝突尺寸煙霧偵測抓不到，因為每筆改動都很小。）
+    2. 別過細：切太碎會被每片固定開銷（boot／context／review／收斂×N）吃掉，且假收斂變多。最小 ≠ 最好，
+       甜蜜點是「還能被獨立驗證、又仍是個有意義的整體」。
+    3. 別讓 base 變單點：所有人都 depends_on 的先行 leaf 要盡量最小、先磨硬再 fan-out（base 契約一錯，下游全部 reflow）。
   🚨 收斂一律依 .loop/rules/convergence.md 的集合穩定協定（先不看舊版、獨立重列舉 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零）。不要在此自訂收斂判準。
   把 decomp_changed_last 設 true（有改動）/ false（無）。
   寫檔只允許 {decomp_file}。結束 git add -A && git commit。
