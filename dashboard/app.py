@@ -589,21 +589,30 @@ def get_human_context(proj_id: str):
     
     reason = ""
     log_excerpt = ""
+    reason_code = ""
     if is_any_human:
         if is_human:
             reason = get_control_val(control_path, "human_required_msg") or get_control_val(control_path, "human_required_reason") or ""
+            reason_code = get_control_val(control_path, "human_required_reason") or ""
         else:
             reason = get_control_val(plan_md, "plan_human_required_msg") or get_control_val(plan_md, "plan_human_required_reason") or ""
+            reason_code = get_control_val(plan_md, "plan_human_required_reason") or ""
             
         if not reason:
             log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "loop.log")
             if is_plan_human and os.path.exists(os.path.join(proj["repo"], ".loop", proj["workspace"], "plan.log")):
                 log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "plan.log")
             reason, log_excerpt = extract_human_context(log_path)
+            # Infer fallback reason_code from content
+            if "stuck" in (reason + log_excerpt).lower():
+                reason_code = "stuck_level_2_hard_stop"
+            elif "conflict" in (reason + log_excerpt).lower():
+                reason_code = "git_review_human_conflict"
         
     return {
         "human_required": is_any_human,
         "reason": reason,
+        "reason_code": reason_code,
         "log_excerpt": log_excerpt
     }
 

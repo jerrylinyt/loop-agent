@@ -676,6 +676,7 @@ def test_dashboard_human_context_endpoint(monkeypatch):
         data1 = r1.json()
         assert data1["human_required"] is True
         assert data1["reason"] == "Stuck level 2 hit!"
+        assert data1["reason_code"] == "stuck_level_2_hard_stop"
         
         # Test resume endpoint clears context reasons
         r2 = client.post(f"/api/projects/{proj_id}/resume")
