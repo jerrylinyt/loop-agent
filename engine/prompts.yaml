@@ -63,11 +63,17 @@ tree_decompose: |
   讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、convergence、completeness、context-budget）。
   獨立重推：將此節點拆成子項，寫進 {decomp_file}。
     - proposed_children: 逗號分隔的子項 ID（簡短 slug）
-    - 每個子項加 child_<id>_type = leaf（可獨立驗證的最小工作單位）或 pending（需進一步拆）
-      🚨 判準：一個子項只有在「可獨立驗證、單一關注點、且預估 ≤ {max_files} 檔、≤ {max_lines} 行」時才算 leaf；
-         任一條不滿足（牽動更多檔/行、或含多個關注點）就標 pending 留待下一輪再拆，不要硬塞成 leaf。
-    - 每個 type=leaf 的子項【必須】加 child_<id>_files = <預估改動檔數> 與 child_<id>_lines = <預估改動行數>
-      （整數；引擎據此自動稽核葉子是否過大、過大會回報重拆。pending 子項免填。）
+    - 每個子項加 child_<id>_type = leaf 或 pending：
+      🚨 主判準（語意，不是數行數）：leaf =「一個內聚、可被單獨驗證、快速模型一輪做得完的【自然交付單位】」。
+         用任務的自然單位切，例如：
+           · 要移植 20 隻 API → 一隻 API 一個 leaf（共 20 個）。
+           · 要建 20 個前端 component → 一個 component 一個 leaf。
+           · 要建共用 component → base 自己一個 leaf，之後每個變體各一個 leaf。
+         一個子項若「涵蓋不只一個這種自然單位」或「無法被單獨驗證」就標 pending，留下一輪再拆。
+      尺寸只是輔助煙霧偵測、不是切割準則：若某 leaf 預估遠超 ≤{max_files} 檔 / ≤{max_lines} 行，
+      回頭確認「它是不是其實包了不只一個自然單位」；但若確為【單一自然單位】（如一隻較大的 API 移植），
+      即使略超門檻仍維持 leaf——❌ 不要為了壓行數把一個內聚單位硬切兩半。
+    - 每個 type=leaf 的子項加 child_<id>_files / child_<id>_lines = <預估改動檔/行數>（整數，供上述煙霧偵測用；pending 子項免填）。
     - 每個子項加 child_<id>_summary = 一句話描述
   🚨 收斂一律依 .loop/rules/convergence.md 的集合穩定協定（先不看舊版、獨立重列舉 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零）。不要在此自訂收斂判準。
   把 decomp_changed_last 設 true（有改動）/ false（無）。
@@ -78,7 +84,9 @@ tree_decompose_gate: |
   審查 {decomp_file} 中 {node_id} 的拆解結果。
   讀 {requirements} + .loop/rules/convergence.md + completeness.md。
   檢查：子項是否互不重疊、是否涵蓋父節點所有面向、
-    leaf 子項是否真的可獨立驗證且符合最小工作單位（≤ {max_files} 檔、≤ {max_lines} 行、單一關注點）。
+    leaf 子項是否真的是「單一內聚、可被單獨驗證的自然交付單位」（用自然單位切：一隻 API / 一個 component / 一個變體＝一個 leaf）。
+    尺寸（≤ {max_files} 檔、≤ {max_lines} 行）只是煙霧偵測：明顯超標的 leaf 要回頭確認是不是其實包了多個單位，
+    若確為單一自然單位則放行，不因行數硬性退回。
   ❗只審查、不修改拆解結果。
   把結果寫進 {decomp_file}：decomp_gate_last = PASS 或 FAIL。
   結束 git add -A && git commit。
