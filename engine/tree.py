@@ -27,7 +27,7 @@ FROZEN = "FROZEN"
 ALL_STATES = (PENDING, DECOMPOSED, LEAF, IN_PROGRESS, CONVERGED, NEEDS_REVISION, FROZEN)
 
 # 每個節點落盤的欄位（前綴 node_{id}_）
-_NODE_FIELDS = ("state", "children", "parent", "depth", "stable_rounds", "reflow_count")
+_NODE_FIELDS = ("state", "children", "parent", "depth", "stable_rounds", "reflow_count", "depends_on")
 
 
 # ─────────────── 路徑與啟用判定 ───────────────
@@ -68,6 +68,7 @@ node_{node_id}_state: {state}
 node_{node_id}_children:
 node_{node_id}_parent: {parent}
 node_{node_id}_depth: {depth}
+node_{node_id}_depends_on: {depends_on}
 node_{node_id}_stable_rounds: 0
 node_{node_id}_reflow_count: 0
 ```
@@ -81,7 +82,7 @@ def seed_tree(path: str, root_id: str = "root") -> bool:
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(_TREE_HEADER.format(root=root_id))
-            f.write(_NODE_BLOCK.format(node_id=root_id, state=PENDING, parent="", depth="0"))
+            f.write(_NODE_BLOCK.format(node_id=root_id, state=PENDING, parent="", depth="0", depends_on=""))
         return True
     except OSError as e:
         logger.error(f"Failed to seed TREE: {e}")
@@ -106,6 +107,9 @@ def get_node(path: str, node_id: str) -> dict | None:
     # children 轉 list
     raw = result["children"]
     result["children"] = [c.strip() for c in raw.split(",") if c.strip()] if raw else []
+    # depends_on 轉 list（同層兄弟 ID）
+    raw_dep = result["depends_on"]
+    result["depends_on"] = [d.strip() for d in raw_dep.split(",") if d.strip()] if raw_dep else []
     # depth 轉 int
     try:
         result["depth"] = int(result["depth"])
@@ -156,7 +160,7 @@ def _update_global_counts(path: str):
 
 
 def add_child(path: str, parent_id: str, child_id: str,
-              initial_state: str = PENDING) -> bool:
+              initial_state: str = PENDING, depends_on: str = "") -> bool:
     parent = get_node(path, parent_id)
     if parent is None:
         logger.error(f"Parent node '{parent_id}' not found")
@@ -168,10 +172,10 @@ def add_child(path: str, parent_id: str, child_id: str,
     parent_depth = parent["depth"]
     child_depth = parent_depth + 1
 
-    # 寫入子節點 k:v block
+    # 寫入子節點 k:v block（depends_on=同層兄弟 ID，供執行期依賴排序）
     _append_block(path, _NODE_BLOCK.format(
         node_id=child_id, state=initial_state,
-        parent=parent_id, depth=str(child_depth)))
+        parent=parent_id, depth=str(child_depth), depends_on=depends_on))
 
     # 更新父的 children 清單
     children = parent["children"]
@@ -302,13 +306,40 @@ def tree_planning_complete(path: str) -> bool:
 
 # ─────────────── 執行期查詢 ───────────────
 
+def _deps_satisfied(path: str, node_id: str) -> bool:
+    """node 的所有 depends_on 是否都已 CONVERGED。
+
+    - 自我依賴：忽略。
+    - 未知/不存在的依賴 ID：視為已滿足（不製造死結；參照正確性由拆解 gate 把關）。
+    """
+    node = get_node(path, node_id)
+    if node is None:
+        return True
+    for dep in node.get("depends_on", []):
+        if dep == node_id:
+            continue
+        dep_state = get_val(path, _node_key(dep, "state"))
+        if dep_state is None:
+            continue  # 未知依賴 → 不阻擋
+        if dep_state != CONVERGED:
+            return False
+    return True
+
+
 def next_ready_leaf(path: str) -> str | None:
-    """找下一個可執行的葉子（LEAF 或 NEEDS_REVISION 狀態）。"""
+    """找下一個可執行的葉子（LEAF 或 NEEDS_REVISION 狀態），且其依賴的兄弟都已 CONVERGED。
+
+    依賴排序：葉子的 depends_on（拆解時宣告，如各變體 depends_on base）未全部 CONVERGED 前不排程，
+    使「base 先於變體」之類的整合順序自動成立，避免對著還沒成形的介面先做、合併時邏輯衝突。
+    若所有未完成葉子都被未收斂的依賴卡住（含循環依賴），會回傳 None → loop 端 fail-safe 停下交人。
+    """
     if not os.path.exists(path):
         return None
     for nid in _iter_node_ids(path):
         st = get_val(path, _node_key(nid, "state"))
-        if st in (LEAF, NEEDS_REVISION):
+        if st not in (LEAF, NEEDS_REVISION):
+            continue
+        if _deps_satisfied(path, nid):
             return nid
     return None
 
@@ -363,6 +394,7 @@ node_id: {node_id}
 parent: {parent}
 description: {description}
 
+integration_contract:
 proposed_children:
 decomp_gate_last:
 decomp_changed_last:
@@ -407,7 +439,8 @@ def finalize_node_children(tree_path: str, cfg: dict, node_id: str) -> list[str]
     for cid in child_ids:
         child_type = get_val(decomp_path, f"child_{cid}_type") or "leaf"
         initial_state = LEAF if child_type == "leaf" else PENDING
-        if add_child(tree_path, node_id, cid, initial_state):
+        dep = get_val(decomp_path, f"child_{cid}_depends_on") or ""
+        if add_child(tree_path, node_id, cid, initial_state, depends_on=dep):
             created.append(cid)
     return created
 
