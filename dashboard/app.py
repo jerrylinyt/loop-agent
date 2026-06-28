@@ -240,12 +240,16 @@ def parse_index():
         return projects
     
     try:
+        header_seen = False
         with open(index_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if not line.startswith("|") or line.startswith("| 專案 ") or set(line) <= set("|-: "):
+                if not line.startswith("|") or set(line) <= set("|-: "):
                     continue
-                
+                if not header_seen:
+                    header_seen = True
+                    continue
+
                 parts = [p.strip() for p in line.split("|")][1:-1]
                 if len(parts) >= 7:
                     repo_name, repo_path, ws, phase, stuck, status, updated_at = parts[:7]
@@ -828,6 +832,28 @@ def download_log(proj_id: str, log_type: str):
         raise HTTPException(status_code=404, detail="Log file not found")
         
     return FileResponse(log_path, media_type="text/plain", filename=f"{proj['repo_name']}-{proj['workspace']}-{log_file}")
+
+@app.get("/api/projects/{proj_id}/rounds")
+def get_project_rounds(proj_id: str, limit: int = 200):
+    proj = get_project_by_id(proj_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    rounds_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "rounds.jsonl")
+    if not os.path.exists(rounds_path):
+        return []
+
+    import json
+    records = []
+    for line in get_last_n_lines(rounds_path, limit):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return records
 
 @app.get("/api/projects/{proj_id}/activity")
 def get_activity(proj_id: str, limit: int = 50):

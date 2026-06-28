@@ -223,6 +223,104 @@ def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
     return False, False
 
 
+def update_stuck_state(cfg: dict, control: str, log_both, *, fail_history, progress: dict,
+                        killed, mode: str, result: str, phase, cur_pass: int,
+                        leaf_label: str = "") -> dict:
+    """共用的『讀本輪結果 → 判進展/無活動/震盪 → 升降 stuck_level』邏輯。
+
+    平模式（`_run_execute_locked`）與樹模式（`_run_tree_execute_locked`）此段邏輯完全一致，
+    過去各自維護一份近乎逐行相同的拷貝；唯一差異是 log 訊息要不要帶葉子標籤
+    （`leaf_label`，例如 `"葉子 [xxx] "`；平模式留空字串）。
+
+    回傳 dict（`stuck_level` / `rounds_since` / `enhanced_used` / `no_activity` / `progressed` /
+    `hard_stop` / `progress`）供呼叫端組裝 `append_round_record`。`hard_stop=True` 時本函式已在該
+    分支內完成 `set_val`/`save_progress` 並提早結束，呼叫端應立即 `return 2`、不要再寫
+    `append_round_record`（與既有『未完成輪不記錄趨勢圖』約定一致，見 docs/engine-rounds-history.md）。
+    """
+    osc = cfg["oscillation"]
+
+    prev_phase = progress.get("phase")
+    prev_pass = progress.get("last_pass")
+    phase_advanced = (prev_phase is not None and str(phase) != str(prev_phase))
+    pass_climbed = (prev_pass is not None and cur_pass > as_int(prev_pass))
+    progressed = phase_advanced or pass_climbed
+
+    sig = progress_signature(cfg, control)
+    prev_sig = progress.get("sig")
+    idle_rounds = as_int(progress.get("idle"))
+    idle_rounds = 0 if (prev_sig is None or sig != prev_sig) else idle_rounds + 1
+    killed_streak = (as_int(progress.get("killed_streak")) + 1) if killed else 0
+    no_activity = max(idle_rounds, killed_streak)
+
+    is_fail_verify = (not killed) and ("驗證" in mode) and (result == "FAIL")
+    stuck_level = as_int(get_val(control, "stuck_level"))
+    rounds_since = as_int(get_val(control, "rounds_since_progress"))
+    enhanced_used = as_int(get_val(control, "enhanced_rounds_used"))
+
+    if progressed:
+        rounds_since = 0
+        fail_history.clear()
+        save_fail_history(cfg, fail_history)
+        if stuck_level != 0:
+            role_tier = model_tier_label(cfg, "execute", 0)
+            log_both(f"  ↩ 有進展，stuck 解除、換回角色預設模型（{role_tier}）。")
+        stuck_level, enhanced_used = 0, 0
+        set_val(control, "current_model_tier", model_tier_label(cfg, "execute", 0))
+        set_val(control, "human_required", "false")
+    elif is_fail_verify:
+        rounds_since += 1
+        fail_history.append(fail_fingerprint(control))
+        save_fail_history(cfg, fail_history)
+        if stuck_level == 1:
+            enhanced_used += 1
+    elif no_activity and stuck_level == 1:
+        enhanced_used += 1
+
+    oscillating = detect_oscillation(fail_history, osc["osc_window"], osc["osc_distinct_max"])
+    idle_stalled = no_activity >= osc["stall_threshold"]
+    fail_stalled = rounds_since >= osc["stall_threshold"]
+    hard_stop = False
+    if stuck_level == 0 and (oscillating or fail_stalled or idle_stalled):
+        stuck_level = 1
+        upgraded_tier = model_tier_label(cfg, "execute", 1)
+        set_val(control, "current_model_tier", upgraded_tier)
+        enhanced_used = 0
+        why = ("震盪 A↔B" if oscillating
+               else f"連續 {no_activity} 輪無任何活動（agent 未提交/計數器未動,疑似空轉或 CLI 逾時）"
+               if idle_stalled else f"連續 {rounds_since} 輪無進展")
+        log_both(f"  ⬆ {leaf_label}偵測到卡住（{why}）→ 升級模型（{upgraded_tier}）。")
+    elif stuck_level == 1 and enhanced_used >= osc["enhanced_max_rounds"]:
+        stuck_level = 2
+        final_tier = model_tier_label(cfg, "execute", 2)
+        set_val(control, "current_model_tier", final_tier)
+        log_both(f"  ⬆⬆ {leaf_label}升級模型（{model_tier_label(cfg, 'execute', 1)}）試了 {enhanced_used} 輪仍卡"
+                 f" → 再升級（{final_tier}）。下一輪請 agent 開 BLOCKING Issue 並凍結互卡任務。")
+    elif stuck_level == 2 and max(rounds_since, no_activity) >= (osc["stall_threshold"] + osc["human_stop_after"]):
+        why = "無任何活動" if no_activity >= rounds_since else "無進展"
+        log_both(f"  ⛔ {leaf_label}升級人類後仍{why}（硬性保險觸發）→ 停下交人類。")
+        set_val(control, "stuck_level", "2")
+        set_val(control, "rounds_since_progress", str(rounds_since))
+        save_progress(cfg, sig=sig, idle=idle_rounds, killed_streak=killed_streak,
+                      phase=phase, last_pass=cur_pass)
+        hard_stop = True
+
+    out = {
+        "stuck_level": stuck_level, "rounds_since": rounds_since, "enhanced_used": enhanced_used,
+        "no_activity": no_activity, "progressed": progressed, "hard_stop": hard_stop,
+    }
+    if hard_stop:
+        return out
+
+    set_val(control, "rounds_since_progress", str(rounds_since))
+    set_val(control, "stuck_level", str(stuck_level))
+    set_val(control, "enhanced_rounds_used", str(enhanced_used))
+    new_progress = {"sig": sig, "idle": idle_rounds, "killed_streak": killed_streak,
+                     "phase": phase, "last_pass": cur_pass}
+    save_progress(cfg, **new_progress)
+    out["progress"] = new_progress
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="階段③:執行收斂迴圈")
     add_common_args(ap)
@@ -363,81 +461,12 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         mode = get_val(control, "last_round_mode") or ""
         result = get_val(control, "last_round_result") or ""
 
-        # 進展判定（跨 phase 正確；prev_* 持久化,重啟也準）
-        prev_phase = progress.get("phase")
-        prev_pass = progress.get("last_pass")
-        phase_advanced = (prev_phase is not None and str(phase) != str(prev_phase))
-        pass_climbed = (prev_pass is not None and cur_pass > as_int(prev_pass))
-        progressed = phase_advanced or pass_climbed
-
-        # 無活動偵測：簽章連續不變 = agent 沒提交、計數器沒動（空轉/反覆中斷/CLI 壞）
-        sig = progress_signature(cfg, control)
-        prev_sig = progress.get("sig")
-        idle_rounds = as_int(progress.get("idle"))
-        idle_rounds = 0 if (prev_sig is None or sig != prev_sig) else idle_rounds + 1
-        # 連續被 watchdog 中斷的輪數（獨立於 git；防『中斷留半套被 commit 而 HEAD 移動』騙過 idle）
-        killed_streak = (as_int(progress.get("killed_streak")) + 1) if killed else 0
-        no_activity = max(idle_rounds, killed_streak)
-
-        is_fail_verify = (not killed) and ("驗證" in mode) and (result == "FAIL")
-        stuck_level = as_int(get_val(control, "stuck_level"))
-        rounds_since = as_int(get_val(control, "rounds_since_progress"))
-        enhanced_used = as_int(get_val(control, "enhanced_rounds_used"))
-
-        if progressed:
-            rounds_since = 0
-            fail_history.clear()
-            save_fail_history(cfg, fail_history)
-            if stuck_level != 0:
-                role_tier = model_tier_label(cfg, "execute", 0)
-                log_both(f"  ↩ 有進展，stuck 解除、換回角色預設模型（{role_tier}）。")
-            stuck_level, enhanced_used = 0, 0
-            set_val(control, "current_model_tier", model_tier_label(cfg, "execute", 0))
-            set_val(control, "human_required", "false")
-        elif is_fail_verify:
-            rounds_since += 1
-            fail_history.append(fail_fingerprint(control))
-            save_fail_history(cfg, fail_history)
-            if stuck_level == 1:
-                enhanced_used += 1
-        elif no_activity and stuck_level == 1:
-            # 無活動但已在增強層 → 也累計增強輪數,免得卡在 Lv1 永不升人類
-            enhanced_used += 1
-
-        # 卡死 = 失敗驗證無進展 / 震盪 / 無任何活動,任一達門檻
-        oscillating = detect_oscillation(fail_history, osc["osc_window"], osc["osc_distinct_max"])
-        idle_stalled = no_activity >= osc["stall_threshold"]
-        fail_stalled = rounds_since >= osc["stall_threshold"]
-        if stuck_level == 0 and (oscillating or fail_stalled or idle_stalled):
-            stuck_level = 1
-            upgraded_tier = model_tier_label(cfg, "execute", 1)
-            set_val(control, "current_model_tier", upgraded_tier)
-            enhanced_used = 0
-            why = ("震盪 A↔B" if oscillating
-                   else f"連續 {no_activity} 輪無任何活動（agent 未提交/計數器未動,疑似空轉或 CLI 逾時）"
-                   if idle_stalled else f"連續 {rounds_since} 輪無進展")
-            log_both(f"  ⬆ 偵測到卡住（{why}）→ 升級模型（{upgraded_tier}）。")
-        elif stuck_level == 1 and enhanced_used >= osc["enhanced_max_rounds"]:
-            stuck_level = 2
-            final_tier = model_tier_label(cfg, "execute", 2)
-            set_val(control, "current_model_tier", final_tier)
-            log_both(f"  ⬆⬆ 升級模型（{model_tier_label(cfg, 'execute', 1)}）試了 {enhanced_used} 輪仍卡"
-                     f" → 再升級（{final_tier}）。下一輪請 agent 開 BLOCKING Issue 並凍結互卡任務。")
-        elif stuck_level == 2 and max(rounds_since, no_activity) >= (osc["stall_threshold"] + osc["human_stop_after"]):
-            why = "無任何活動" if no_activity >= rounds_since else "無進展"
-            log_both(f"  ⛔ 升級人類後仍{why}（硬性保險觸發）→ 停下交人類。")
-            set_val(control, "stuck_level", "2")
-            set_val(control, "rounds_since_progress", str(rounds_since))
-            save_progress(cfg, sig=sig, idle=idle_rounds, killed_streak=killed_streak,
-                          phase=phase, last_pass=cur_pass)
+        upd = update_stuck_state(cfg, control, log_both, fail_history=fail_history, progress=progress,
+                                  killed=killed, mode=mode, result=result, phase=phase, cur_pass=cur_pass)
+        if upd["hard_stop"]:
             return 2
 
-        set_val(control, "rounds_since_progress", str(rounds_since))
-        set_val(control, "stuck_level", str(stuck_level))
-        set_val(control, "enhanced_rounds_used", str(enhanced_used))
-        progress = {"sig": sig, "idle": idle_rounds, "killed_streak": killed_streak,
-                    "phase": phase, "last_pass": cur_pass}   # 同步記憶體,供下一輪比對
-        save_progress(cfg, **progress)
+        progress = upd["progress"]   # 同步記憶體,供下一輪比對
         append_round_record(cfg, {
             "run_id": run_id,
             "ts": datetime.now().strftime("%F %T"),
@@ -448,12 +477,12 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             "result": result,
             "mode": mode,
             "killed": killed,
-            "stuck_level": stuck_level,
-            "rounds_since_progress": rounds_since,
-            "enhanced_rounds_used": enhanced_used,
-            "no_activity": no_activity,
+            "stuck_level": upd["stuck_level"],
+            "rounds_since_progress": upd["rounds_since"],
+            "enhanced_rounds_used": upd["enhanced_used"],
+            "no_activity": upd["no_activity"],
             "consecutive_pass": cur_pass,
-            "progressed": progressed,
+            "progressed": upd["progressed"],
             "model_tier": tier,
         })
 
@@ -604,75 +633,13 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         mode = get_val(control, "last_round_mode") or ""
         result = get_val(control, "last_round_result") or ""
 
-        prev_phase = progress.get("phase")
-        prev_pass = progress.get("last_pass")
-        phase_advanced = (prev_phase is not None and str(phase) != str(prev_phase))
-        pass_climbed = (prev_pass is not None and cur_pass > as_int(prev_pass))
-        progressed = phase_advanced or pass_climbed
-
-        sig = progress_signature(cfg, control)
-        prev_sig = progress.get("sig")
-        idle_rounds = as_int(progress.get("idle"))
-        idle_rounds = 0 if (prev_sig is None or sig != prev_sig) else idle_rounds + 1
-        killed_streak = (as_int(progress.get("killed_streak")) + 1) if killed else 0
-        no_activity = max(idle_rounds, killed_streak)
-
-        is_fail_verify = (not killed) and ("驗證" in mode) and (result == "FAIL")
-        stuck_level = as_int(get_val(control, "stuck_level"))
-        rounds_since = as_int(get_val(control, "rounds_since_progress"))
-        enhanced_used = as_int(get_val(control, "enhanced_rounds_used"))
-
-        if progressed:
-            rounds_since = 0
-            fail_history.clear()
-            save_fail_history(cfg, fail_history)
-            if stuck_level != 0:
-                role_tier = model_tier_label(cfg, "execute", 0)
-                log_both(f"  ↩ 有進展，stuck 解除、換回角色預設模型（{role_tier}）。")
-            stuck_level, enhanced_used = 0, 0
-            set_val(control, "current_model_tier", model_tier_label(cfg, "execute", 0))
-            set_val(control, "human_required", "false")
-        elif is_fail_verify:
-            rounds_since += 1
-            fail_history.append(fail_fingerprint(control))
-            save_fail_history(cfg, fail_history)
-            if stuck_level == 1:
-                enhanced_used += 1
-        elif no_activity and stuck_level == 1:
-            enhanced_used += 1
-
-        oscillating = detect_oscillation(fail_history, osc["osc_window"], osc["osc_distinct_max"])
-        idle_stalled = no_activity >= osc["stall_threshold"]
-        fail_stalled = rounds_since >= osc["stall_threshold"]
-        if stuck_level == 0 and (oscillating or fail_stalled or idle_stalled):
-            stuck_level = 1
-            upgraded_tier = model_tier_label(cfg, "execute", 1)
-            set_val(control, "current_model_tier", upgraded_tier)
-            enhanced_used = 0
-            why = ("震盪 A↔B" if oscillating
-                   else f"連續 {no_activity} 輪無任何活動"
-                   if idle_stalled else f"連續 {rounds_since} 輪無進展")
-            log_both(f"  ⬆ 葉子 [{current_leaf}] 卡住（{why}）→ 升級模型（{upgraded_tier}）。")
-        elif stuck_level == 1 and enhanced_used >= osc["enhanced_max_rounds"]:
-            stuck_level = 2
-            final_tier = model_tier_label(cfg, "execute", 2)
-            set_val(control, "current_model_tier", final_tier)
-            log_both(f"  ⬆⬆ 葉子 [{current_leaf}] 升級模型（{model_tier_label(cfg, 'execute', 1)}）仍卡"
-                     f" → 再升級（{final_tier}）。")
-        elif stuck_level == 2 and max(rounds_since, no_activity) >= (osc["stall_threshold"] + osc["human_stop_after"]):
-            log_both(f"  ⛔ 葉子 [{current_leaf}] 升級人類後仍卡住 → 停下交人。")
-            set_val(control, "stuck_level", "2")
-            set_val(control, "rounds_since_progress", str(rounds_since))
-            save_progress(cfg, sig=sig, idle=idle_rounds, killed_streak=killed_streak,
-                          phase=phase, last_pass=cur_pass)
+        upd = update_stuck_state(cfg, control, log_both, fail_history=fail_history, progress=progress,
+                                  killed=killed, mode=mode, result=result, phase=phase, cur_pass=cur_pass,
+                                  leaf_label=f"葉子 [{current_leaf}] ")
+        if upd["hard_stop"]:
             return 2
 
-        set_val(control, "rounds_since_progress", str(rounds_since))
-        set_val(control, "stuck_level", str(stuck_level))
-        set_val(control, "enhanced_rounds_used", str(enhanced_used))
-        progress = {"sig": sig, "idle": idle_rounds, "killed_streak": killed_streak,
-                    "phase": phase, "last_pass": cur_pass}
-        save_progress(cfg, **progress)
+        progress = upd["progress"]
         append_round_record(cfg, {
             "run_id": run_id,
             "ts": datetime.now().strftime("%F %T"),
@@ -683,12 +650,12 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             "result": result,
             "mode": mode,
             "killed": killed,
-            "stuck_level": stuck_level,
-            "rounds_since_progress": rounds_since,
-            "enhanced_rounds_used": enhanced_used,
-            "no_activity": no_activity,
+            "stuck_level": upd["stuck_level"],
+            "rounds_since_progress": upd["rounds_since"],
+            "enhanced_rounds_used": upd["enhanced_used"],
+            "no_activity": upd["no_activity"],
             "consecutive_pass": cur_pass,
-            "progressed": progressed,
+            "progressed": upd["progressed"],
             "model_tier": tier,
         })
 

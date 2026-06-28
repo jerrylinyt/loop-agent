@@ -267,6 +267,16 @@
                     </div>
                 </div>
 
+                <!-- Progress Trend (rounds.jsonl sparkline) -->
+                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-sm mt-6">
+                    <h3 class="text-lg font-bold text-gray-300 mb-4 flex items-center gap-2">
+                        <span>📈 Progress Trend / 進度趨勢</span>
+                    </h3>
+                    <div id="rounds-sparkline" class="w-full overflow-x-auto">
+                        <div class="text-gray-500 text-sm">No round history found in rounds.jsonl.</div>
+                    </div>
+                </div>
+
                 <!-- Activity Timeline -->
                 <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-sm mt-6">
                     <h3 class="text-lg font-bold text-gray-300 mb-4 flex items-center gap-2">
@@ -663,6 +673,16 @@
                     staleBadge = `<span class="ml-2 px-1.5 py-0.5 bg-yellow-600 text-white rounded text-[10px] font-bold">⚠️ Stale Lock</span>`;
                 }
 
+                const stuckVal = parseInt(p.stuck) || 0;
+                let stuckClass = 'text-gray-200';
+                if (p.status === 'human_required' || p.status === 'FROZEN') {
+                    stuckClass = 'text-red-500 animate-pulse';
+                } else if (stuckVal >= 2) {
+                    stuckClass = 'text-orange-500';
+                } else if (stuckVal === 1) {
+                    stuckClass = 'text-yellow-400';
+                }
+
                 let runningInfo = '';
                 if (isRunning && p.started_at) {
                     const startMs = Date.parse(p.started_at.replace(/-/g, '/'));
@@ -809,6 +829,7 @@
             switchTab('overview');
             loadControlData(p.id);
             loadActivityTimeline(p.id);
+            loadRoundsSparkline(p.id);
 
             // Clear node details
             document.getElementById('node-details-empty').style.display = 'block';
@@ -1181,6 +1202,53 @@
             }
         }
 
+        async function loadRoundsSparkline(projId) {
+            try {
+                const res = await fetch(`/api/projects/${projId}/rounds?limit=100`);
+                if (!res.ok) return;
+                const rounds = await res.json();
+
+                const container = document.getElementById('rounds-sparkline');
+                if (!container) return;
+
+                if (!rounds || rounds.length === 0) {
+                    container.innerHTML = '<div class="text-gray-500 text-sm">No round history found in rounds.jsonl.</div>';
+                    return;
+                }
+
+                const stepX = 12;
+                const w = Math.max(rounds.length * stepX, 200);
+                const h = 60;
+                const maxStuck = 2;
+                const points = rounds.map((r, i) => {
+                    const x = i * stepX + 6;
+                    const stuck = Math.min(Math.max(parseInt(r.stuck_level) || 0, 0), maxStuck);
+                    const y = h - 6 - (stuck / maxStuck) * (h - 12);
+                    return { x, y, r };
+                });
+
+                const polyline = points.map(p => `${p.x},${p.y}`).join(' ');
+                const dots = points.map(p => {
+                    let color = '#6b7280';
+                    if (p.r.killed) color = '#a855f7';
+                    else if (p.r.result === 'PASS') color = '#22c55e';
+                    else if (p.r.result === 'FAIL') color = '#ef4444';
+                    const title = `round ${p.r.round ?? '?'} | ${p.r.ts ?? ''} | stuck=${p.r.stuck_level ?? '-'} | result=${p.r.result ?? '-'}${p.r.killed ? ' | killed=' + p.r.killed : ''}`;
+                    return `<circle cx="${p.x}" cy="${p.y}" r="3" fill="${color}"><title>${title}</title></circle>`;
+                }).join('');
+
+                container.innerHTML = `
+                    <svg width="${w}" height="${h}" class="block">
+                        <polyline points="${polyline}" fill="none" stroke="#fbbf24" stroke-width="1.5" />
+                        ${dots}
+                    </svg>
+                    <div class="text-[10px] text-gray-500 mt-1">stuck_level over last ${rounds.length} rounds &middot; 🟢 PASS &nbsp;🔴 FAIL &nbsp;🟣 killed &nbsp;⚪ other</div>
+                `;
+            } catch (err) {
+                console.error("Error loading rounds sparkline:", err);
+            }
+        }
+
         function renderColoredDiff(diffText) {
             const container = document.getElementById('diff-window');
             if (!container) return;
@@ -1538,6 +1606,7 @@
                 if (isOverviewActive) {
                     loadControlData(currentProjectId);
                     loadActivityTimeline(currentProjectId);
+                    loadRoundsSparkline(currentProjectId);
                 }
 
                 const isTreeActive = document.getElementById('tab-tree').classList.contains('text-blue-400');
