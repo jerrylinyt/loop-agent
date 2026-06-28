@@ -15,8 +15,10 @@
 ## 你要產出三樣東西（放 code repo 的 .loop/<name>/，即 `{control}` 所在目錄）
 1. **`loop.config.yaml`**（填 `templates/loop.config.template.yaml`）
    - 依需求決定 **phases**(幾個、各 name、spec 檔、output 位置、converge_threshold)。最後一筆=最終階段。
-   - 設 `stop_condition`、`oscillation` 門檻、`runtime`(含 context 防爆旋鈕)、`models`。
+   - 設 `stop_condition`、`oscillation` 門檻、`runtime`(含 context 防爆旋鈕)。
    - `framework_path` 指向共享框架 clone;`workspace.mode` 依需求。
+   - ⚠️ **不要動 `agent.build_cmd` / `agent.models`**——這兩項已由人類在 `bootstrap.md` STEP 2 填好實際值
+     (preflight 會在這個迴圈啟動前就檢查過,若還是佔位值根本進不到這一輪)。
 2. **`CONTROL.md`**（填 `templates/CONTROL.template.md`）
    - **每個 phase 一張狀態表**(任務清單,Status/Conv/Round 欄)。
    - coverage 定義(每個指標寫清楚**分母來源**)。
