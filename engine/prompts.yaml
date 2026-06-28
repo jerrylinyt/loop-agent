@@ -64,6 +64,10 @@ tree_decompose: |
   獨立重推：將此節點拆成子項，寫進 {decomp_file}。
     - proposed_children: 逗號分隔的子項 ID（簡短 slug）
     - 每個子項加 child_<id>_type = leaf（可獨立驗證的最小工作單位）或 pending（需進一步拆）
+      🚨 判準：一個子項只有在「可獨立驗證、單一關注點、且預估 ≤ {max_files} 檔、≤ {max_lines} 行」時才算 leaf；
+         任一條不滿足（牽動更多檔/行、或含多個關注點）就標 pending 留待下一輪再拆，不要硬塞成 leaf。
+    - 每個 type=leaf 的子項【必須】加 child_<id>_files = <預估改動檔數> 與 child_<id>_lines = <預估改動行數>
+      （整數；引擎據此自動稽核葉子是否過大、過大會回報重拆。pending 子項免填。）
     - 每個子項加 child_<id>_summary = 一句話描述
   🚨 收斂一律依 .loop/rules/convergence.md 的集合穩定協定（先不看舊版、獨立重列舉 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零）。不要在此自訂收斂判準。
   把 decomp_changed_last 設 true（有改動）/ false（無）。
