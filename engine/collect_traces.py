@@ -13,6 +13,12 @@ sys.path.insert(0, HERE)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("collect_traces")
 
+def as_int(v, d=0) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return d
+
 def parse_index_file(index_path: str) -> list[dict]:
     workspaces = []
     if not os.path.exists(index_path):
@@ -163,10 +169,10 @@ def main():
     total_rounds_count = len(all_rounds)
 
     # 3.1 Escalation rate
-    stuck_rounds = sum(1 for r in all_rounds if int(r.get("stuck_level") or 0) >= 1)
+    stuck_rounds = sum(1 for r in all_rounds if as_int(r.get("stuck_level")) >= 1)
     escalation_rate_overall = (stuck_rounds / total_rounds_count) if total_rounds_count > 0 else 0.0
 
-    stuck_runs = {r.get("run_id") for r in all_rounds if int(r.get("stuck_level") or 0) >= 1 and r.get("run_id")}
+    stuck_runs = {r.get("run_id") for r in all_rounds if as_int(r.get("stuck_level")) >= 1 and r.get("run_id")}
 
     # Escalation rate by phase
     rounds_by_phase = {}
@@ -174,7 +180,7 @@ def main():
     for r in all_rounds:
         phase = str(r.get("phase", "unknown"))
         rounds_by_phase[phase] = rounds_by_phase.get(phase, 0) + 1
-        if int(r.get("stuck_level", 0)) >= 1:
+        if as_int(r.get("stuck_level")) >= 1:
             stuck_by_phase[phase] = stuck_by_phase.get(phase, 0) + 1
 
     escalation_by_phase = {}
@@ -265,7 +271,7 @@ def main():
             
         for phase, phase_rounds in phases_in_run.items():
             sorted_pr = sorted(phase_rounds, key=lambda r: (r.get("round", 0), r.get("ts", "")))
-            max_enhanced = max([int(r.get("enhanced_rounds_used") or 0) for r in sorted_pr] or [0])
+            max_enhanced = max([as_int(r.get("enhanced_rounds_used")) for r in sorted_pr] or [0])
             if max_enhanced >= args.enhanced_threshold:
                 last_r = sorted_pr[-1]
                 if not last_r.get("progressed", False):
@@ -289,7 +295,7 @@ def main():
         for r in sorted_rounds:
             phase = str(r.get("phase", "unknown"))
             rounds_by_phase_reset[phase] = rounds_by_phase_reset.get(phase, 0) + 1
-            curr_pass = int(r.get("consecutive_pass", 0))
+            curr_pass = as_int(r.get("consecutive_pass"))
             prev_pass = prev_pass_by_phase.get(phase)
             if prev_pass is not None and prev_pass > 0 and curr_pass == 0:
                 total_resets += 1

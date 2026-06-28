@@ -190,7 +190,12 @@ def run_git_review_gate(cfg: dict, log_both) -> tuple[bool, bool]:
             return False, True
 
         log_both("  (全為自動提交) 執行自動 Revert...")
-        subprocess.run(["git", "revert", "--no-edit", f"{last_safe_sha}..{current_head}"])
+        revert_res = subprocess.run(["git", "revert", "--no-edit", f"{last_safe_sha}..{current_head}"])
+        if revert_res.returncode != 0:
+            subprocess.run(["git", "revert", "--abort"])
+            log_both("  🚨 [Revert 失敗] 自動 Revert 發生衝突無法完成（可能與更早改動衝突）！")
+            log_both("  為保護專案，停止執行，請手動處理衝突後重新啟動。")
+            return False, True
         return False, False
 
     # ── fail-closed（稽核 #7）：必須有【明確 [REVIEW: PASS]】+【逐條紅線清單】才放行。──
