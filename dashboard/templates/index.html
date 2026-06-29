@@ -269,6 +269,55 @@
                     </div>
                 </div>
 
+                <!-- Requirements Table -->
+                <div id="requirements-panel" class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-sm mt-6" style="display: none;">
+                    <h3 class="text-lg font-bold text-gray-300 mb-4 flex items-center gap-2">
+                        <span>🎯 Requirements Traceability / 需求追溯與驗收表</span>
+                    </h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-700">
+                            <thead>
+                                <tr class="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                                    <th class="py-3 px-4">Requirement ID</th>
+                                    <th class="py-3 px-4">Task ID</th>
+                                    <th class="py-3 px-4">Verification Method</th>
+                                </tr>
+                            </thead>
+                            <tbody id="requirements-table-body" class="divide-y divide-gray-700 text-sm">
+                                <tr>
+                                    <td colspan="3" class="py-4 text-center text-gray-500">No requirements mapped.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Issues Table -->
+                <div id="issues-panel" class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-sm mt-6" style="display: none;">
+                    <h3 class="text-lg font-bold text-gray-300 mb-4 flex items-center gap-2">
+                        <span>🐛 Project Issues / 專案 Issue 追蹤清單</span>
+                    </h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-700">
+                            <thead>
+                                <tr class="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                                    <th class="py-3 px-4">Issue ID</th>
+                                    <th class="py-3 px-4">Level</th>
+                                    <th class="py-3 px-4">Title</th>
+                                    <th class="py-3 px-4">Phase / Task</th>
+                                    <th class="py-3 px-4">Status</th>
+                                    <th class="py-3 px-4">Round</th>
+                                </tr>
+                            </thead>
+                            <tbody id="issues-table-body" class="divide-y divide-gray-700 text-sm">
+                                <tr>
+                                    <td colspan="6" class="py-4 text-center text-gray-500">No issues tracked.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- Progress Trend (rounds.jsonl sparkline) -->
                 <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-sm mt-6">
                     <h3 class="text-lg font-bold text-gray-300 mb-4 flex items-center gap-2">
@@ -1569,6 +1618,53 @@
                     });
                 } else {
                     tableBody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No phase data available.</td></tr>';
+                }
+
+                // Render Requirements Mappings
+                const reqPanel = document.getElementById('requirements-panel');
+                const reqTableBody = document.getElementById('requirements-table-body');
+                if (reqPanel && reqTableBody) {
+                    reqTableBody.innerHTML = '';
+                    if (data.requirements_map && data.requirements_map.length > 0) {
+                        reqPanel.style.display = 'block';
+                        data.requirements_map.forEach(item => {
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `
+                                <td class="py-3 px-4 text-white font-mono font-semibold">${item.req_id}</td>
+                                <td class="py-3 px-4 text-blue-400 font-mono font-semibold">${item.task_id}</td>
+                                <td class="py-3 px-4 text-gray-300">${item.verify || '-'}</td>
+                            `;
+                            reqTableBody.appendChild(tr);
+                        });
+                    } else {
+                        reqPanel.style.display = 'none';
+                    }
+                }
+
+                // Render Project Issues
+                const issPanel = document.getElementById('issues-panel');
+                const issTableBody = document.getElementById('issues-table-body');
+                if (issPanel && issTableBody) {
+                    issTableBody.innerHTML = '';
+                    if (data.issues && data.issues.length > 0) {
+                        issPanel.style.display = 'block';
+                        data.issues.forEach(item => {
+                            const tr = document.createElement('tr');
+                            const lvlClass = item.level === 'BLOCKING' ? 'bg-red-600/30 text-red-400' : 'bg-yellow-600/30 text-yellow-400';
+                            const statusClass = item.status === 'OPEN' ? 'text-orange-400 font-bold' : 'text-gray-400';
+                            tr.innerHTML = `
+                                <td class="py-3 px-4 text-white font-mono font-semibold">${item.id}</td>
+                                <td class="py-3 px-4"><span class="px-2 py-0.5 rounded text-xs font-semibold ${lvlClass}">${item.level}</span></td>
+                                <td class="py-3 px-4 text-gray-200">${item.title}</td>
+                                <td class="py-3 px-4 text-gray-300 font-mono">${item.phase || '-'}/${item.task || '-'}</td>
+                                <td class="py-3 px-4 ${statusClass}">${item.status}</td>
+                                <td class="py-3 px-4 text-gray-400 font-mono">${item.round || '-'}</td>
+                            `;
+                            issTableBody.appendChild(tr);
+                        });
+                    } else {
+                        issPanel.style.display = 'none';
+                    }
                 }
             } catch (err) {
                 console.error("Error loading control data:", err);

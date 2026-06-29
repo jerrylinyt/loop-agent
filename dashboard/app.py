@@ -386,7 +386,13 @@ def parse_control_file(control_path: str) -> dict:
                     "threshold": threshold_val
                 })
             res["phases"] = phases_list
+            res["requirements_map"] = data.get("requirements_map", [])
+            res["issues"] = data.get("issues", [])
+            res["plan"] = data.get("plan", {})
+            res["mode"] = data.get("mode", "flat")
+            res["repo_structure"] = data.get("repo_structure", "")
             return res
+
         except Exception as e:
             print(f"Failed to parse state.json: {e}")
 
