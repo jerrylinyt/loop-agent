@@ -96,7 +96,7 @@
 | 項目 | 設計 |
 |---|---|
 | 入口 | 解析 `~/.loop/index.md`（可 `--index` 覆蓋）取得所有 `repo + workspace`；逐一定位 `<repo>/.loop/<ws>/.loop_state/` |
-| 讀什麼 | 每個 ws 讀 `rounds.jsonl`（typed records；從 `round_finished.fail_fingerprint` 取震盪指紋，從 round/progress 欄位取進度訊號）、以及 `CONTROL.md` 的少數計數器快照（blocking issues / FROZEN 數 / 各 phase consecutive_pass / human_required） |
+| 讀什麼 | 每個 ws 讀 `rounds.jsonl`（typed records；從 `round_finished.fail_fingerprint` 取震盪指紋，從 round/progress 欄位取進度訊號）、以及 `state.json` 的少數計數器快照（blocking issues / FROZEN 數 / 各 phase consecutive_pass / human_required） |
 | 產出 | `maintenance/trace-snapshots/<日期>/snapshot.jsonl`（一行一輪、附 `run_id` `repo` `ws`）+ 一份 `summary.json`（見 §5 指標） |
 | 紅線 | **只讀不寫下游**；下游缺檔/壞檔/無 `.loop_state` → skip 該 ws 記 warning，不中斷；**絕不寫框架以外的任何地方** |
 | 隱私 | trace 只含結構化欄位（phase id / 計數 / 指紋 hash / 模型 tier），**不含原始程式碼或需求內文**——天然適合跨專案聚合 |
