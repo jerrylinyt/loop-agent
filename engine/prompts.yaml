@@ -34,10 +34,16 @@ git_review: |
   目前狀態檔的完整內容如下：
   {control_contents}
 
-  請依據規則嚴格審查，並將結果【覆寫】進 `{result_file}` 檔案，內容【依序】為：
-    1) 逐條紅線清單：git-review-gate.md §2 的每一條，各一行標 `PASS` 或 `FLAG`（FLAG 附 檔:行/片段佐證）；
-    2) 最後一行寫最終判決，三選一：`[REVIEW: PASS]` / `[REVIEW: REVERT] <原因>` / `[REVIEW: FATAL_STATE] <原因>`。
-  🚨 引擎 fail-closed：缺逐條清單、或缺明確 `[REVIEW: PASS]`，該次審查一律視為無效、不放行（連續多次會停下交人）。
+  Write exactly one JSON object to `{result_file}`. The engine accepts only this JSON contract:
+  {
+    "verdict": "PASS" | "REVERT" | "FATAL_STATE",
+    "reason": "short human-readable reason",
+    "checklist": [
+      {"item": "review gate checklist item", "status": "PASS" | "FLAG", "note": "optional evidence"}
+    ]
+  }
+  For PASS, `checklist` must contain at least 6 objects and every status must be PASS or FLAG.
+  For REVERT or FATAL_STATE, include the blocking reason and the same checklist shape.
   🚨 寫完判決即停止輸出、不做任何額外動作（不執行 git commit、不修改任何其他檔案）。
 
 plan: |

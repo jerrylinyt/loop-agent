@@ -5,7 +5,7 @@
 > **這是一個全新的 context，你不需要、也不能修改檔案，只要給出判決。**
 
 ## 1. 審查目標
-確保上一輪的改動合理且沒有破壞現有結構。若發現任何以下「判死刑」的狀況，必須毫不留情地給出 `[REVIEW: REVERT]`。
+確保上一輪的改動合理且沒有破壞現有結構。若發現任何以下「判死刑」的狀況，必須毫不留情地輸出 JSON verdict `"REVERT"`。
 
 ## 2. 審查紅線（中一條即 REVERT）
 
@@ -19,7 +19,7 @@
    - 狀態檔內的 Markdown 表格（如 `current_phase`, `stuck_level` 等變數）是否保持嚴謹的 Key-Value 格式？是否被扭曲、合併或刪除？
    - 任務追蹤用的 Checkbox `[ ]` / `[x]` 是否被破壞導致無法解析？
    - 改動後的上下文語意是否矛盾？（例如表格寫已抵達 Phase 3，但下方紀錄卻被退回 Phase 1）。
-   - 若狀態控制的核心骨架遺失或受到毀滅性破壞，請直接判決 `[REVIEW: FATAL_STATE]`。
+   - 若狀態控制的核心骨架遺失或受到毀滅性破壞，請直接輸出 JSON verdict `"FATAL_STATE"`。
 
 3. **不合理狀態進展**
    - 狀態的跳躍是否過於誇張？（例如：`p1_consecutive_pass` 從 1 突然變成 8，或是突然把一堆未執行的任務全部標記為完成）。
@@ -107,16 +107,21 @@
 凡 `FLAG` 必附 檔:行 或片段佐證。❌ 嚴禁:只寫一句「看起來正常」就給 PASS;
 **沒有逐條清單的 PASS 判決一律視為無效**(等同未審查)。
 
-**將「逐條清單 + 最終判決」覆寫到 Prompt 指定的 `{result_file}`**：先逐條清單，
-**最後一行**寫最終判決（三選一）。⚠️ 引擎 fail-closed：缺逐條清單、或最後沒有明確
-`[REVIEW: PASS]`，該次審查一律視為無效、不放行（連續多次無效會停下交人，見 loop.py）。
+**將單一 JSON 物件覆寫到 Prompt 指定的 `{result_file}`**。⚠️ 引擎 fail-closed：檔案不是 JSON object、缺 verdict、PASS 缺合法逐條清單，該次審查一律視為無效、不放行（連續多次無效會停下交人，見 loop.py）。
 
-- 若一切正常（最後一行）：
-  `[REVIEW: PASS]`
-- 若觸碰任何紅線（由引擎自動退回重試）：
-  `[REVIEW: REVERT] <具體原因描述，例如：發生中斷殘留，Markdown 未閉合>`
-- 若發現**狀態檔遭到毀滅性破壞**（例如 `CONTROL.md` 表格全毀，退回也無濟於事，必須人類介入）：
-  `[REVIEW: FATAL_STATE] <具體原因描述，例如：CONTROL.md 狀態控制表格被完全刪除>`
+```json
+{
+  "verdict": "PASS",
+  "reason": "short human-readable reason",
+  "checklist": [
+    {"item": "review gate checklist item", "status": "PASS", "note": "optional evidence"}
+  ]
+}
+```
+
+- 若一切正常：`verdict` 必須是 `"PASS"`，且 `checklist` 至少 6 筆；每筆都要有非空 `item` 與 `"PASS"`/`"FLAG"` 狀態。
+- 若觸碰任何紅線（由引擎自動退回重試）：`verdict` 寫 `"REVERT"`，`reason` 寫具體原因。
+- 若發現**狀態檔遭到毀滅性破壞**（例如 `CONTROL.md` 表格全毀，退回也無濟於事，必須人類介入）：`verdict` 寫 `"FATAL_STATE"`，`reason` 寫具體原因。
 
 ⚠️ **注意**：
 1. 必須是覆寫 (Overwrite) 該檔案，不要用附加 (Append)。

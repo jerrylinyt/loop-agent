@@ -47,9 +47,9 @@
 
 ### 引擎層（commit 843ea8a、c63412c）
 11. **is_done 去除自我認證**（engine/utils.py `is_done`）：是否**只認**客觀計數器路徑、不再因 agent 自寫 `stop_condition_met:true` 而停？確認 `done_flag` 已是 inert，且樹模式葉子收斂（loop.py 用 is_done 處）未被改壞。
-12. **Review Gate fail-closed**（engine/loop.py `run_git_review_gate`）：空檔/亂寫/缺 `[REVIEW: PASS]`/缺逐條清單，是否都**不放行**（不前進 last_safe_sha）？連續無效是否有界升級交人（`enhanced_max_rounds`）而非無限重審或無限放行？
+12. **Review Gate fail-closed**（engine/loop.py `run_git_review_gate`）：空檔/亂寫/非 JSON/缺 `verdict`/PASS 缺合法 `checklist`，是否都**不放行**（不前進 last_safe_sha）？連續無效是否有界升級交人（`enhanced_max_rounds`）而非無限重審或無限放行？
 13. **樹模式也有 Review Gate**（engine/loop.py `_run_tree_execute_locked`）：是否在挑葉子前呼叫 `run_git_review_gate`，且 revert 後 `current_leaf` 重置？
-14. **prompts.yaml ↔ 引擎一致**：`git_review` prompt 是否要求「逐條清單＋最後一行明確判決」（否則 fail-closed 會把每次 PASS 都打成無效→輪輪升級交人）？
+14. **prompts.yaml ↔ 引擎一致**：`git_review` prompt 是否要求輸出單一 JSON verdict object（PASS 時含至少 6 筆合法 checklist）（否則 fail-closed 會把每次 PASS 都打成無效→輪輪升級交人）？
 
 > 對 11–14 特別問一句：**有沒有哪條規則承諾了引擎其實不擋的事，或引擎認的字面值規則寫錯**（rule↔engine 漂移就是新空子）。
 
