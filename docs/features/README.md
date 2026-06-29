@@ -20,6 +20,7 @@ The plans are split by feature so separate agents can implement them independent
 12. `12-engine-cooperative-stop.md`
 13. `13-engine-artifact-index.md`
 14. `14-state-cli-and-json-review-gate.md`
+15. `15-machine-readable-state-store.md`
 
 ## Scope Rules
 
