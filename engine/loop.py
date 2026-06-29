@@ -242,7 +242,7 @@ def run_git_review_gate(cfg: dict, control: str, log_both) -> tuple[bool, str, s
         state_json = _state_json_path(control)
         if os.path.exists(state_json):
             render_all(state_json)
-        return False, "", ""
+        return False, "", reason
 
     if decision == "PASS":
         set_val(control, "last_safe_sha", current_head)
@@ -442,6 +442,8 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
     if progress:
         log_both(f"  ↺ 從 rounds.jsonl 接續進度標記（idle={progress.get('idle', '0')}）。")
 
+    _pending_revert_notice = ""
+
     for i in range(1, rt["max_rounds"] + 1):
         if check_stop_requested(cfg, log_both):
             return 1
@@ -461,6 +463,10 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             return 2
         if not passed:
             log_both("  [Git Review Gate] 已還原，跳過本輪執行以重試。")
+            _pending_revert_notice = (
+                f"⚠️ 上一輪 commit 已被 Git Review Gate 自動 REVERT。原因：{halt_msg}\n"
+                "本輪請先確認並避免相同問題，再動手執行任務。"
+            )
             continue
 
         if os.path.exists(control):
@@ -489,7 +495,9 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         stuck_level = as_int(get_val(control, "stuck_level"))
         model = select_model(cfg, "execute", stuck_level)
         tier = model_tier_label(cfg, "execute", stuck_level)
-        prompt = base_prompt + ("\n" + escalation_prompt if stuck_level >= 1 else "")
+        prompt = (_pending_revert_notice + "\n" if _pending_revert_notice else "") \
+                 + base_prompt + ("\n" + escalation_prompt if stuck_level >= 1 else "")
+        _pending_revert_notice = ""
         cmd = build_cmd(cfg, model, prompt)
 
         ts = datetime.now().strftime("%F %T")
@@ -651,6 +659,7 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         log_both(f"  ↺ 從 rounds.jsonl 接續進度標記（idle={progress.get('idle', '0')}）。")
 
     current_leaf = None
+    _pending_revert_notice = ""
 
     for i in range(1, rt["max_rounds"] + 1):
         if check_stop_requested(cfg, log_both):
@@ -672,6 +681,10 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             return 2
         if not passed:
             log_both("  [Git Review Gate] 已還原/退回，跳過本輪執行以重試。")
+            _pending_revert_notice = (
+                f"⚠️ 上一輪 commit 已被 Git Review Gate 自動 REVERT。原因：{halt_msg}\n"
+                "本輪請先確認並避免相同問題，再動手執行任務。"
+            )
             current_leaf = None    # 被 revert 後重新挑葉子,避免指向已回退狀態
             continue
 
@@ -725,7 +738,9 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         stuck_level = as_int(get_val(control, "stuck_level"))
         model = select_model(cfg, "execute", stuck_level)
         tier = model_tier_label(cfg, "execute", stuck_level)
-        prompt = base_prompt + ("\n" + escalation_prompt if stuck_level >= 1 else "")
+        prompt = (_pending_revert_notice + "\n" if _pending_revert_notice else "") \
+                 + base_prompt + ("\n" + escalation_prompt if stuck_level >= 1 else "")
+        _pending_revert_notice = ""
         cmd = build_cmd(cfg, model, prompt)
 
         ts = datetime.now().strftime("%F %T")
