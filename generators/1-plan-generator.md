@@ -7,25 +7,20 @@
 > **收斂迴圈行為(每輪務必遵守)**:
 > 1. 若已存在規劃書 → **先不看舊版、從 REQUIREMENTS 獨立重推一份**,再與現有比對。
 > 2. **只在有「實質差異」時才改檔**;無實質差異就不要動檔(讓它穩定下來)。
-> 3. 更新 `PLAN.md`(本 workspace 內,即 `{plan_md}`):`plan_changed_last`(true=本輪有實質改動/false)。
+> 3. 更新 `state.json` 中的 `plan` 物件:`plan_changed_last`(true=本輪有實質改動/false)與 `plan_status`。
 > 4. ❗**Plan Gate 由獨立的下一輪負責審查**(全新 context,讀 `2-plan-review-gate.md`,只審不生)——
->    這一輪(生成輪)**不要自己跑 Gate**,以免自己生、自己審的橡皮圖章。
+>    這一輪(生成輪)不要自己跑 Gate，以免自己生、自己審的橡皮圖章。
 > 連續達門檻輪「無實質變更且 Gate PASS」→ plan_loop 判定規劃書收斂(gated 停下交人類 / auto 接執行)。
 
-## 你要產出三樣東西（放 code repo 的 .loop/<name>/，即 `{control}` 所在目錄）
+## 你要產出兩樣東西（放 code repo 的 .loop/<name>/ 目錄下）
 1. **`loop.config.yaml`**（填 `templates/loop.config.template.yaml`）
    - 依需求決定 **phases**(幾個、各 name、spec 檔、output 位置、converge_threshold)。最後一筆=最終階段。
    - 設 `stop_condition`、`oscillation` 門檻、`runtime`(含 context 防爆旋鈕)。
    - `framework_path` 指向共享框架 clone;`workspace.mode` 依需求。
    - ⚠️ **不要動 `agent.build_cmd` / `agent.models`**——這兩項已由人類在 `bootstrap.md` STEP 2 填好實際值
      (preflight 會在這個迴圈啟動前就檢查過,若還是佔位值根本進不到這一輪)。
-2. **`CONTROL.md`**（填 `templates/CONTROL.template.md`）
-   - **每個 phase 一張狀態表**(任務清單,Status/Conv/Round 欄)。
-   - coverage 定義(每個指標寫清楚**分母來源**)。
-   - repo 結構(這個專案的輸入/產出夾)。
-   - 通用協定段落**引用** `.loop/rules/*`(boot/git/收斂/防漏/震盪/issue),**不要 copy-paste**。
-   - 活計數器區(依 `rules/state-model.md`,每 phase 一組 `p{id}_*`)。
-3. **`phases/PHASE1.md … PHASEn.md`**（填 `templates/PHASE.template.md`）
+   - 🚨 **不需要產出任何 Markdown 狀態檔案（如 `CONTROL.md` 等）**，也嚴禁手動或寫腳本修改 `state.json`。收斂後系統會自動依據你的 `loop.config.yaml` 建立 `state.json` 骨架。你如果需要定義「需求→任務追溯表」或「Coverage 定義」，這些資訊會被直接定義在 `loop.config.yaml`（例如 requirements_map 欄位）或隨後自動寫入 `state.json`。
+2. **`phases/PHASE1.md … PHASEn.md`**（填 `templates/PHASE.template.md`）
    - 每階段一份,把該階段的任務逐一寫成「依賴讀取 / 做什麼 / 產出位置 / 驗證標準」。
    - 數量 = config.phases 數。
 

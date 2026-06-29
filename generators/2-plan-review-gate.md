@@ -1,11 +1,13 @@
 # 🚦 GENERATOR — 階段②門：Plan Review Gate
 
 > **怎麼用**:階段②生成規劃書後、開始執行(階段③)前,跑這份檢查表。**全過**才放行;**人類確認 plan + 看輪數估算**後才開始。
-> 由一個 agent(最好是新 context)對著生成的 `loop.config.yaml` + `CONTROL.md` + `phases/*.md` 逐項打勾並附證據。
+> 由一個 agent(最好是新 context)對著生成的 `loop.config.yaml` + `state.json` + `phases/*.md` 逐項打勾並附證據。
+
 
 ## 檢查表（全過才放行）
 ```
-□ 需求全覆蓋:CONTROL 的「需求→任務」追溯表中,每條 R### 都對應到至少一個任務(逐條列出對應)。
+□ 需求全覆蓋:state.json（或 loop.config.yaml）的「需求→任務」追溯表中，每條 R### 都對應到至少一個任務(逐條列出對應)。
+
 □ 需求逐條驗收:最終 phase 的「全量驗證清單」必須明列『逐條 R### 驗收』項——
             停止條件只看 p{last}_pass>=N 與 blocking==0,若驗證清單沒把每條需求當作驗收項,
             就可能「內部計數全綠卻沒真正達標」(BLUEPRINT 原則1/反模式「解錯問題」)。

@@ -111,7 +111,8 @@ def main():
     ws_dir = os.path.dirname(os.environ.get("LOOP_CONFIG", ".loop/default/loop.config.yaml"))
     ws_flag = f" --workspace {ws}" if ws != "default" else ""
     print("\n🧑 mode=gated:規劃書已收斂,停下交人類 review。")
-    print(f"   review {ws_dir}/{{loop.config.yaml, CONTROL.md, phases/}} 後,執行:")
+    print(f"   review {ws_dir}/{{loop.config.yaml, state.json, phases/}} 後,執行:")
+
     print(f"   python {os.path.join(HERE, 'run.py')} --stage execute{ws_flag}")
     return 0
 

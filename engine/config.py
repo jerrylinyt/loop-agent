@@ -166,9 +166,17 @@ def model_tier_label(cfg: dict, role: str, stuck_level: int = 0) -> str:
 def fmt_prompt(template: str, **kw) -> str:
     """提示樣板代入（用 replace 兼容舊版的 {key} 語法，避免內文花括號干擾 str.format）。"""
     out = template or ""
+    if "state_cli" not in kw:
+        control = kw.get("control", "CONTROL.md")
+        base_dir = os.path.dirname(os.path.abspath(control)) if control else os.path.abspath(".")
+        state_json_path = os.path.join(base_dir, "state.json")
+        state_py_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.py")
+        kw["state_cli"] = f"python {state_py_path} --state {state_json_path}"
+
     for k, v in kw.items():
         out = out.replace("{" + k + "}", str(v))
     return out
+
 
 
 def load_yaml(path: str) -> dict:

@@ -15,11 +15,11 @@
    - 是否有寫到一半的殘留程式碼或未完成的句子？
 
 2. **排版與狀態檔結構破壞 (嚴格審查)**
-   - ⚠️ 你現在不只會看到 Diff，還會看到最新的 `CONTROL.md` 等核心狀態檔完整內容。
-   - 狀態檔內的 Markdown 表格（如 `current_phase`, `stuck_level` 等變數）是否保持嚴謹的 Key-Value 格式？是否被扭曲、合併或刪除？
-   - 任務追蹤用的 Checkbox `[ ]` / `[x]` 是否被破壞導致無法解析？
-   - 改動後的上下文語意是否矛盾？（例如表格寫已抵達 Phase 3，但下方紀錄卻被退回 Phase 1）。
+   - ⚠️ 你現在不只會看到 Diff，還會看到最新的 `state.json` 狀態檔完整內容。
+   - 狀態檔 `state.json` 是否保持合法的 JSON 結構與格式？是否被扭曲、欄位被無故刪除或格式寫壞？
+   - 改動後的上下文語意是否矛盾？（例如 `current_phase` 寫已抵達 3，但任務卻都還在 Phase 1）。
    - 若狀態控制的核心骨架遺失或受到毀滅性破壞，請直接輸出 JSON verdict `"FATAL_STATE"`。
+
 
 3. **不合理狀態進展**
    - 狀態的跳躍是否過於誇張？（例如：`p1_consecutive_pass` 從 1 突然變成 8，或是突然把一堆未執行的任務全部標記為完成）。
@@ -100,30 +100,40 @@
 
 ## 3. 輸出格式
 
-🚨 強制約束(你是最後一道安全網,你的判決本身不准被橡皮圖章):判決檔【必須】先附上
-**逐條紅線檢查清單**——上面 §2 的每一條(中斷殘留、排版/狀態破壞、不合理進展、中間挖空、思考外洩、
-語意一致、佔位符偷懶、刪檔/路徑幻覺、衝突標記、語法全毀、驗收證據缺失、收斂計數防偽、
-產出異動未歸零、整合輪越界改葉子),逐條標 `PASS` 或 `FLAG`,
-凡 `FLAG` 必附 檔:行 或片段佐證。❌ 嚴禁:只寫一句「看起來正常」就給 PASS;
-**沒有逐條清單的 PASS 判決一律視為無效**(等同未審查)。
-
-**將單一 JSON 物件覆寫到 Prompt 指定的 `{result_file}`**。⚠️ 引擎 fail-closed：檔案不是 JSON object、缺 verdict、PASS 缺合法逐條清單，該次審查一律視為無效、不放行（連續多次無效會停下交人，見 loop.py）。
+🚨 強制約束(你是最後一道安全網,你的判決本身不准被橡皮圖章)：
+你必須將單一 JSON 物件覆寫到 Prompt 指定的 `{result_file}`。檔案前後不得有任何散文或 HTML 標籤（包括 ```json ``` 標籤也請不要輸出，僅輸出純 JSON）。
 
 ```json
 {
   "verdict": "PASS",
-  "reason": "short human-readable reason",
   "checklist": [
-    {"item": "review gate checklist item", "status": "PASS", "note": "optional evidence"}
-  ]
+    { "id": 1,  "name": "中斷與殘留防護",        "result": "PASS" },
+    { "id": 2,  "name": "排版與狀態檔結構破壞",   "result": "PASS" },
+    { "id": 3,  "name": "不合理狀態進展",         "result": "PASS" },
+    { "id": 4,  "name": "中間區段被挖空",         "result": "PASS" },
+    { "id": 5,  "name": "思考過程外洩",           "result": "PASS" },
+    { "id": 6,  "name": "語意一致性",             "result": "PASS" },
+    { "id": 7,  "name": "AI偷懶佔位符",           "result": "PASS" },
+    { "id": 8,  "name": "無故刪檔與路徑幻覺",      "result": "PASS" },
+    { "id": 9,  "name": "衝突標記與取代錯位",      "result": "PASS" },
+    { "id": 10, "name": "基礎語法與格式全毀",      "result": "PASS" },
+    { "id": 11, "name": "驗收證據缺失",           "result": "PASS" },
+    { "id": 12, "name": "收斂計數防偽",           "result": "PASS" },
+    { "id": 13, "name": "產出異動卻沒歸零收斂",    "result": "PASS" },
+    { "id": 14, "name": "整合輪越界改葉子",        "result": "PASS" }
+  ],
+  "reason": ""
 }
 ```
 
-- 若一切正常：`verdict` 必須是 `"PASS"`，且 `checklist` 至少 6 筆；每筆都要有非空 `item` 與 `"PASS"`/`"FLAG"` 狀態。
-- 若觸碰任何紅線（由引擎自動退回重試）：`verdict` 寫 `"REVERT"`，`reason` 寫具體原因。
-- 若發現**狀態檔遭到毀滅性破壞**（例如 `CONTROL.md` 表格全毀，退回也無濟於事，必須人類介入）：`verdict` 寫 `"FATAL_STATE"`，`reason` 寫具體原因。
+🚨 限制與規則：
+1. `verdict`：只能是 `"PASS"`、`"REVERT"`、`"FATAL_STATE"` 之一。
+2. `checklist`：必須精確包含上面 14 項紅線檢查（如實標明各 id 與 name）。`result` 僅能為 `"PASS"` 或 `"FLAG"`。當 `result` 是 `"FLAG"` 時，該項物件內**必須包含 `"evidence"` 欄位**以說明具體證據（檔:行 或程式段落）；若為 `"PASS"` 時，則不得包含 `"evidence"` 或是 `"evidence"` 留空。
+3. `reason`：當 `verdict` 為 `"REVERT"` 或 `"FATAL_STATE"` 時**必填**（人類可讀原因）；`PASS` 時必須為空字串。
+4. ⚠️ 引擎 fail-closed：檔案若非合法 JSON、欄位缺失、`checklist` 項目數不等於 14、`FLAG` 缺乏證據、或 `REVERT/FATAL_STATE` 缺乏 reason，該判決一律被視為無效判決（不放行且累計 streak，滿 8 次會停機交給人類）。
 
 ⚠️ **注意**：
 1. 必須是覆寫 (Overwrite) 該檔案，不要用附加 (Append)。
 2. 寫檔完成後即可結束，**不要**執行 `git commit`。
 3. 🚨 寫完判決檔即【立即停止輸出、結束本 process】，控制權交還引擎；❌ 嚴禁額外修改任何檔案、自行重審、或續跑下一輪。
+

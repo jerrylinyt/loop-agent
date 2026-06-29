@@ -679,13 +679,14 @@ def test_git_review_gate_requires_json_verdict():
             f.write("[REVIEW: PASS]\n")
         assert _load_review_verdict(result_path) is None
 
-        checklist = [{"item": f"check {i}", "status": "PASS"} for i in range(6)]
+        checklist = [{"id": i + 1, "name": f"check {i}", "result": "PASS"} for i in range(14)]
         with open(result_path, "w", encoding="utf-8") as f:
-            json.dump({"verdict": "PASS", "reason": "ok", "checklist": checklist}, f)
+            json.dump({"verdict": "PASS", "reason": "", "checklist": checklist}, f)
 
         verdict = _load_review_verdict(result_path)
         assert verdict["verdict"] == "PASS"
         assert _review_checklist_valid(verdict) is True
+
 
 
 def test_dashboard_human_context_endpoint(monkeypatch):

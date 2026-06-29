@@ -10,7 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
 import yaml
+import json
 import hashlib
+
 
 app = FastAPI(title="Loop Engineering Dashboard")
 
@@ -73,7 +75,60 @@ def get_index_path():
 
 def get_control_val(control_path: str, key: str) -> str | None:
     if not os.path.exists(control_path):
-        return None
+        # 即使傳入的路徑不存在，我們也嘗試找同目錄下的 state.json
+        base_dir = os.path.dirname(control_path)
+        if not os.path.exists(os.path.join(base_dir, "state.json")):
+            return None
+
+    # 1. 優先試圖從 state.json 讀取
+    base_dir = os.path.dirname(control_path)
+    state_json = os.path.join(base_dir, "state.json")
+    if not os.path.exists(state_json) and control_path.endswith("state.json"):
+        state_json = control_path
+    if os.path.exists(state_json):
+        try:
+            with open(state_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # 對於 tree nodes 的快速查詢
+            import re
+            m = re.match(r"^node_(\S+?)_(state|children|parent|depth|stable_rounds|reflow_count)$", key)
+            if m:
+                nid = m.group(1)
+                sub_key = m.group(2)
+                node = data.get("tree", {}).get("nodes", {}).get(nid, {})
+                if sub_key == "children":
+                    return ",".join(node.get("children", []))
+                return str(node.get(sub_key, ""))
+                
+            # 對於 p{id}_* 的快速查詢
+            pm = re.match(r"^p(\d+)_(consecutive_pass|total_validations|last_result)$", key)
+            if pm:
+                pid = pm.group(1)
+                sub_key = pm.group(2)
+                for ph in data.get("phases", []):
+                    if str(ph.get("id")) == pid:
+                        return str(ph.get(sub_key, ""))
+                        
+            # 對於通用控制變數
+            if key in ("current_phase", "plan_version", "framework_ref"):
+                return str(data.get(key, ""))
+            if key == "blocking_issues":
+                issues = data.get("issues", [])
+                blocking = len([i for i in issues if i.get("status") == "OPEN" and i.get("level") == "BLOCKING"])
+                return str(blocking)
+                
+            # 從 control 子物件讀取
+            ctrl = data.get("control", {})
+            if key in ctrl:
+                val = ctrl.get(key)
+                if isinstance(val, bool):
+                    return "true" if val else "false"
+                return str(val)
+        except Exception:
+            pass
+
+    # 2. Fallback 到舊有的 CONTROL.md 正則解析
     try:
         with open(control_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -148,7 +203,96 @@ def get_last_n_lines(file_path: str, n: int) -> list[str]:
 
 def set_control_val(control_path: str, key: str, value: str):
     if not os.path.exists(control_path):
-        return
+        base_dir = os.path.dirname(control_path)
+        if not os.path.exists(os.path.join(base_dir, "state.json")):
+            return
+
+    # 1. 優先寫入 state.json
+    base_dir = os.path.dirname(control_path)
+    state_json = os.path.join(base_dir, "state.json")
+    if not os.path.exists(state_json) and control_path.endswith("state.json"):
+        state_json = control_path
+    if os.path.exists(state_json):
+        try:
+            with open(state_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # 對於 tree nodes 的更新
+            import re
+            m = re.match(r"^node_(\S+?)_(state|children|parent|depth|stable_rounds|reflow_count)$", key)
+            if m:
+                nid = m.group(1)
+                sub_key = m.group(2)
+                if "tree" not in data:
+                    data["tree"] = {"root": "root", "nodes": {}}
+                if "nodes" not in data["tree"]:
+                    data["tree"]["nodes"] = {}
+                if nid not in data["tree"]["nodes"]:
+                    data["tree"]["nodes"][nid] = {}
+                node = data["tree"]["nodes"][nid]
+                if sub_key == "children":
+                    node["children"] = [c.strip() for c in value.split(",") if c.strip()]
+                elif sub_key in ("depth", "stable_rounds", "reflow_count"):
+                    try:
+                        node[sub_key] = int(value)
+                    except ValueError:
+                        node[sub_key] = 0
+                else:
+                    node[sub_key] = value
+                    
+            # 對於 p{id}_* 的更新
+            elif re.match(r"^p(\d+)_(consecutive_pass|total_validations|last_result)$", key):
+                pm = re.match(r"^p(\d+)_(consecutive_pass|total_validations|last_result)$", key)
+                pid = pm.group(1)
+                sub_key = pm.group(2)
+                target_ph = None
+                for ph in data.get("phases", []):
+                    if str(ph.get("id")) == pid:
+                        target_ph = ph
+                        break
+                if not target_ph:
+                    target_ph = {"id": pid, "tasks": [], "coverage": []}
+                    data["phases"].append(target_ph)
+                
+                if sub_key in ("consecutive_pass", "total_validations"):
+                    try:
+                        target_ph[sub_key] = int(value)
+                    except ValueError:
+                        target_ph[sub_key] = 0
+                else:
+                    target_ph[sub_key] = value
+                    
+            # 對於通用控制變數
+            elif key == "current_phase":
+                data["current_phase"] = value
+            elif key == "plan_version":
+                try:
+                    data["plan_version"] = int(value)
+                except ValueError:
+                    data["plan_version"] = 1
+            elif key == "framework_ref":
+                data["framework_ref"] = value
+            else:
+                # 寫入 control 物件
+                if "control" not in data:
+                    data["control"] = {}
+                val = value
+                if value == "true":
+                    val = True
+                elif value == "false":
+                    val = False
+                data["control"][key] = val
+            
+            # 原子寫入
+            temp_file = state_json + ".tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(temp_file, state_json)
+            return
+        except Exception as e:
+            print(f"Failed to set control JSON value: {e}")
+
+    # 2. Fallback 到舊有的 CONTROL.md 正則修改
     import re
     pat = re.compile(rf"^(\s*{re.escape(key)}\s*:\s*).*?(\s*(#.*)?)$")
     out, hit = [], False
@@ -169,9 +313,79 @@ def set_control_val(control_path: str, key: str, value: str):
         print(f"Failed to set control value: {e}")
 
 
+
 def parse_control_file(control_path: str) -> dict:
     if not os.path.exists(control_path):
-        return {}
+        base_dir = os.path.dirname(control_path)
+        if not os.path.exists(os.path.join(base_dir, "state.json")):
+            return {}
+
+    # 1. 優先從 state.json 讀取與解析
+    base_dir = os.path.dirname(control_path)
+    state_json = os.path.join(base_dir, "state.json")
+    if not os.path.exists(state_json) and control_path.endswith("state.json"):
+        state_json = control_path
+    if os.path.exists(state_json):
+        try:
+            with open(state_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            res = {}
+            res["current_phase"] = str(data.get("current_phase", "1"))
+            res["plan_version"] = str(data.get("plan_version", 1))
+            res["framework_ref"] = data.get("framework_ref", "")
+            
+            issues = data.get("issues", [])
+            blocking_issues = len([i for i in issues if i.get("status") == "OPEN" and i.get("level") == "BLOCKING"])
+            res["blocking_issues"] = str(blocking_issues)
+            
+            ctrl = data.get("control", {})
+            for k, v in ctrl.items():
+                if isinstance(v, bool):
+                    res[k] = "true" if v else "false"
+                else:
+                    res[k] = str(v) if v is not None else ""
+                    
+            # 讀取 loop.config.yaml thresholds
+            config_path = os.path.join(os.path.dirname(state_json), "loop.config.yaml")
+            thresholds = {}
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r", encoding="utf-8") as cf:
+                        config_data = yaml.safe_load(cf)
+                        if isinstance(config_data, dict):
+                            phases_conf = config_data.get("phases", [])
+                            if isinstance(phases_conf, list):
+                                for p_conf in phases_conf:
+                                    if isinstance(p_conf, dict) and "id" in p_conf:
+                                        p_id = str(p_conf["id"])
+                                        try:
+                                            thresholds[p_id] = int(p_conf.get("converge_threshold"))
+                                        except (TypeError, ValueError):
+                                            thresholds[p_id] = None
+                except Exception:
+                    pass
+
+            phases_list = []
+            for ph in data.get("phases", []):
+                pid = str(ph.get("id"))
+                consec = ph.get("consecutive_pass", 0)
+                tot = ph.get("total_validations", 0)
+                last_res = ph.get("last_result", "")
+                threshold_val = thresholds.get(pid)
+                phases_list.append({
+                    "id": pid,
+                    "consecutive_pass": str(consec),
+                    "total_validations": str(tot),
+                    "last_result": last_res if last_res else "N/A",
+                    "threshold": threshold_val
+                })
+            res["phases"] = phases_list
+            return res
+        except Exception as e:
+            print(f"Failed to parse state.json: {e}")
+
+    # 2. Fallback 到舊有的 CONTROL.md 正則解析
     import re
     data = {}
     phase_ids = set()
@@ -203,12 +417,9 @@ def parse_control_file(control_path: str) -> dict:
                         for p_conf in phases_conf:
                             if isinstance(p_conf, dict) and "id" in p_conf:
                                 p_id = str(p_conf["id"])
-                                # Only keep numeric thresholds; un-filled configs carry a
-                                # placeholder string (e.g. "<逐階段自訂…>") which must become
-                                # None so the UI falls back to a plain count instead of a
-                                # misleading "X/1 = 100%" progress bar.
                                 try:
                                     thresholds[p_id] = int(p_conf.get("converge_threshold"))
+                                
                                 except (TypeError, ValueError):
                                     thresholds[p_id] = None
         except Exception:
@@ -927,6 +1138,46 @@ def get_project_tree(proj_id: str):
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
         
+    # 1. 優先從 state.json 讀取樹拓撲
+    state_json = os.path.join(proj["repo"], ".loop", proj["workspace"], "state.json")
+    if os.path.exists(state_json):
+        try:
+            with open(state_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            is_enabled = data.get("mode", "flat") == "tree"
+            root_id = data.get("tree", {}).get("root") or "root"
+            if not is_enabled:
+                return {"tree_enabled": False, "nodes": [], "root": root_id}
+                
+            nodes_data = data.get("tree", {}).get("nodes", {})
+            nodes = {}
+            for nid, node in nodes_data.items():
+                description = nid
+                decomp_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "tree", f"{nid}.decomp.md")
+                if os.path.exists(decomp_path):
+                    desc_val = get_control_val(decomp_path, "description")
+                    if desc_val:
+                        description = desc_val
+                        
+                nodes[nid] = {
+                    "id": nid,
+                    "state": node.get("state", "PENDING"),
+                    "children": node.get("children", []),
+                    "parent": node.get("parent") or "",
+                    "depth": node.get("depth", 0),
+                    "stable_rounds": node.get("stable_rounds", 0),
+                    "reflow_count": node.get("reflow_count", 0),
+                    "description": description
+                }
+            return {
+                "tree_enabled": True,
+                "nodes": list(nodes.values()),
+                "root": root_id
+            }
+        except Exception as e:
+            print(f"Failed to load tree from state.json: {e}")
+
+    # 2. Fallback 到舊有的 TREE.md 解析
     tree_md = os.path.join(proj["repo"], ".loop", proj["workspace"], "TREE.md")
     if not os.path.exists(tree_md):
         return {"tree_enabled": False, "nodes": [], "root": None}

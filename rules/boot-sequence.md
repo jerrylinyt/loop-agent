@@ -9,12 +9,13 @@
  BOOT SEQUENCE
 ══════════════════════════════════════════════════════
 
-STEP 0 ▶ 只讀「本專案 CONTROL.md」全文 + 本輪需要的「framework rules」那幾份。
-         必讀:CONTROL.md、本檔 boot-sequence.md。
+STEP 0 ▶ 只讀「本專案 state.json」全文 + 本輪需要的「framework rules」那幾份。
+         必讀:state.json、本檔 boot-sequence.md。
          按需讀:當輪用到的協定(做收斂讀 convergence.md / 大範圍讀 completeness.md…)。
          ❌ 不要一次載入全部 rules、不要先讀 phase 檔/輸入/產出(還不知道要哪些)。(見 context-budget.md)
 
-STEP 1 ▶ 讀 CONTROL「變數與計數器」,取得 current_phase 與計數器(定義見 state-model.md)。
+STEP 1 ▶ 讀取變數與計數器。狀態唯一的單一事實來源為 state.json。本輪執行時應讀取 state.json 以取得 current_phase、計數器與任務狀態。
+
 
 STEP 2 ▶ 檢查停止條件(依 config.stop_condition):
          IF current_phase==<config.phases 最後一筆> AND
@@ -94,17 +95,27 @@ STEP 7 ▶ 執行「STEP 4 挑定的那【唯一一個】任務」/ 該輪那一
 STEP 8 ▶ 產出落地到 config.phases[current_phase].output。
          發現前人或前階段規格錯誤 → 修改該檔 + 寫「修正記錄」(issues.md)。
 
-STEP 9 ▶ 回 CONTROL 更新:對應狀態表、覆蓋率/統計、Issue 索引、計數器。
-         ⚠️ 務必回填三個「震盪偵測」欄位(外部 loop 靠它判斷卡死):
-            last_round_mode(推進/驗證)、last_round_result(PASS/FAIL/NA)、
-            last_round_fail_tasks(驗證失敗被打回的任務,逗號分隔,PASS 留空)。
+STEP 9 ▶ 更新狀態。狀態唯一的單一事實來源為 state.json，**嚴禁手動編輯 CONTROL.md 的 YAML 或狀態表格**。
+         你必須一律呼叫系統提供的 `{state_cli}` 工具更新狀態（完整命令操作指引與範例請務必閱讀並依據 .loop/rules/state-cli-guide.md 執行），例如：
+           · 推進模式下任務狀態變更：呼叫 `{state_cli} task-status --phase <phase> --task <task> --to DRAFTED` 
+           · 任務收斂增加計數：呼叫 `{state_cli} task-conv --phase <phase> --task <task> --incr`
+           · 任務完成標記為 CONVERGED（前題是 conv 達門檻）：呼叫 `{state_cli} task-status --phase <phase> --task <task> --to CONVERGED`
+           · 重置任務收斂計數：呼叫 `{state_cli} task-conv --phase <phase> --task <task> --reset`
+           · 遭遇退回修正：呼叫 `{state_cli} task-status --phase <phase> --task <task> --to NEEDS_REVISION`
+         ⚠️ 務必回填三個「震盪偵測」欄位（引擎決策關鍵）：
+           · `{state_cli} set control.last_round_mode <推進|驗證>`
+           · `{state_cli} set control.last_round_result <PASS|FAIL|NA>`
+           · `{state_cli} set control.last_round_fail_tasks "<以逗號分隔的任務ID>"`（PASS 留空）
          🚨 留證鐵則(不只信自評,對齊 git-review-gate.md §2-11「驗收證據缺失」):
             本輪若把 last_round_result 標 PASS,且該任務是「可驗證的」(有 build/test/編譯器把關)——
             commit 內【必須】含本輪實際跑的驗收指令與其原始輸出(或 STEP 4 那種證據檔),
             ❌ 嚴禁只寫一句「全部 PASS / 全綠」。無證據的 PASS 會被獨立審查輪 REVERT(視為假推進)。
          若本輪因震盪被升級到人類(stuck_level=2):依 oscillation-escalation.md 開 BLOCKING Issue、
-            把互卡任務改 FROZEN;若已無其他可做任務則設 human_required=true。
-         📌 CONTROL 要保持「決策最小集」:執行日誌只留最近 1~2 筆,其餘只進 loop.log(context-budget.md)。
+            把互卡任務改 FROZEN（使用 `{state_cli} task-status --phase <phase> --task <task> --to FROZEN`）;
+            若已無其他可做任務則設 `{state_cli} set control.human_required true`。
+         每次呼叫 CLI 修改後，狀態會被安全原子寫入 state.json，人類可以使用 Web Dashboard 查看最新狀態看板。
+
+
 
 STEP C ▶ 【Git 提交 — 本輪的還原點】(只在工作區 / code repo)
          git add -A   (掃不到外部 framework,天然不會混入)

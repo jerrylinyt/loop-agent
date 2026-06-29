@@ -31,7 +31,24 @@ FRAMEWORK = os.path.dirname(os.path.abspath(__file__))
 
 
 def parse_control_file(control_path: str) -> tuple[str, str]:
-    """解析 CONTROL.md 中的 current_phase 與 stuck_level 變數"""
+    """解析狀態檔案以獲取 current_phase 與 stuck_level 變數"""
+    base_dir = os.path.dirname(control_path)
+    state_json = os.path.join(base_dir, "state.json")
+    if not os.path.exists(state_json) and control_path.endswith("state.json"):
+        state_json = control_path
+        
+    if os.path.exists(state_json):
+        try:
+            import json
+            with open(state_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            current_phase = str(data.get("current_phase", "-"))
+            stuck_level = str(data.get("control", {}).get("stuck_level", "-"))
+            return current_phase, stuck_level
+        except Exception:
+            pass
+
+    # Fallback to CONTROL.md
     current_phase = "-"
     stuck_level = "-"
     if os.path.exists(control_path):
@@ -39,7 +56,6 @@ def parse_control_file(control_path: str) -> tuple[str, str]:
             with open(control_path, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     line = line.strip()
-                    # 移除註解
                     if "#" in line:
                         line = line.split("#", 1)[0].strip()
                     if line.startswith("current_phase:"):
@@ -49,6 +65,7 @@ def parse_control_file(control_path: str) -> tuple[str, str]:
         except Exception:
             pass
     return current_phase, stuck_level
+
 
 
 def get_worktrees() -> list[dict]:
@@ -206,9 +223,10 @@ def cmd_list(args) -> int:
                 else:
                     status = "⏸ idle"
 
-                # 讀取 CONTROL.md 狀態
-                control_path = os.path.join(wt_path, ".loop", ws, "CONTROL.md")
+                # 讀取 state.json 狀態
+                control_path = os.path.join(wt_path, ".loop", ws, "state.json")
                 phase, stuck = parse_control_file(control_path)
+
 
                 rows.append({
                     "path": wt_path,

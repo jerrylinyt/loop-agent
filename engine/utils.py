@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime
 
 from git_utils import in_git_repo, changed_files
-from state import get_val, as_int
+from state import get_val, as_int, load_state_json, _state_json_path
 
 logger = logging.getLogger(__name__)
 
@@ -264,21 +264,43 @@ def final_phase_id(cfg: dict) -> str | None:
 def is_done(cfg: dict, control: str) -> bool:
     """停止只認【客觀計數器路徑】:current_phase==最後階段 且 p{last}_pass>=門檻 且 blocking==0。
 
-    ⚠️ 安全：刻意【不】把 agent 自寫的 done_flag(stop_condition_met) 當成獨立停止捷徑——
-    否則弱模型只要寫一行 `stop_condition_met: true` 就能無條件跳過計數器/blocking 收工
-    (對抗式稽核 #4)。done_flag 現為 inert 註記欄,非觸發器；真正的「全任務 CONVERGED」
-    由 agent 在 boot STEP 2 把關 + Git Review Gate 兜底。
+    在平模式 (flat) 下，加驗最後 phase 全任務 CONVERGED（無 TODO/FROZEN/PENDING/NEEDS_REVISION）。
     """
     sc = cfg["stop_condition"]
     last = final_phase_id(cfg)
     if last is None:
         return False
+    
+    # 基礎計數器比對
     phase = get_val(control, "current_phase")
-    return (
+    basic_ok = (
         str(phase) == str(last)
         and as_int(get_val(control, f"p{last}_consecutive_pass")) >= sc["final_phase_pass_gte"]
         and as_int(get_val(control, sc["blocking_field"])) == sc["blocking_eq"]
     )
+    if not basic_ok:
+        return False
+
+    # 檢查是否為平模式加驗
+    state_json = _state_json_path(control)
+    if os.path.exists(state_json):
+        data = load_state_json(state_json)
+        if data.get("mode", "flat") == "flat":
+            phases = data.get("phases", [])
+            target_ph = None
+            for ph in phases:
+                if str(ph.get("id")) == str(last):
+                    target_ph = ph
+                    break
+            if not target_ph:
+                return False
+            tasks = target_ph.get("tasks", [])
+            if not tasks:
+                return False
+            # 檢查是否所有任務皆為 CONVERGED
+            return all(t.get("status") == "CONVERGED" for t in tasks)
+
+    return True
 
 
 def human_needed(cfg: dict, control: str) -> bool:

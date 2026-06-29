@@ -13,10 +13,14 @@
 # ─────────────────────────────────────────────────────────────────────────
 
 base: |
-  請讀取 {control}，依 .loop/rules/boot-sequence.md 的 BOOT SEQUENCE 開始工作（結束時做 STEP C 的提交）。
+  請讀取狀態檔 {control}，依 .loop/rules/boot-sequence.md 的 BOOT SEQUENCE 開始工作（結束時做 STEP C 的提交）。
   🚨 嚴格遵守 boot-sequence 兩條鐵則：本輪只挑【單一一個】任務；STEP 10 完成 commit 後【立即停止輸出並結束 process】，絕不自行開下一輪。
-  本輪必讀：{control} 與 .loop/rules/boot-sequence.md；其餘 rules 按需讀（收斂讀 convergence.md、大範圍讀 completeness.md…）。
-  每輪務必回填 last_round_mode / last_round_result / last_round_fail_tasks。
+  本輪必讀：{control} 與 .loop/rules/boot-sequence.md；其餘 rules 按需讀。
+  🚨 狀態更新鐵則：狀態資料存於 {control}，你一律禁止直接碰觸或修改 {control} 檔案本身！
+  在需要更新狀態或填寫 last_round_mode, last_round_result 等欄位時，請務必先閱讀並依循 .loop/rules/state-cli-guide.md 指引，呼叫系統提供的 `{state_cli}` 進行更新！
+  ❌ 任何直接修改 {control} 檔案的行為，皆會被 Review Gate 判定為無效並 REVERT。
+
+
 
 escalation: |
   前幾輪偵測到反覆修壞（A↔B 震盪 / 卡在驗證）。請先判斷根因再動手：
@@ -26,15 +30,43 @@ escalation: |
 
 git_review: |
   你正在執行 Loop Engineering 的【獨立 Git Review Gate】（全新 context，只審不寫 code）。
-  目標：審查上一次的 Commit Diff 是否合理，並驗證核心狀態檔是否遭到破壞。
+  目標：審查上一次的 Commit Diff 是否合理，並驗證狀態變更是否合規。
 
   必讀規則：.loop/rules/git-review-gate.md
   Diff 範圍：{diff_range}
-  核心狀態檔路徑：
-  {control_files}
+  當前 Commit Diff 內容：
+  {diff_content}
 
-  請依規則檔要求自行讀取 diff 與必要狀態檔，只把單一 JSON verdict object 覆寫到 `{result_file}`。
-  🚨 寫完判決即停止輸出、不做任何額外動作（不執行 git commit、不修改任何其他檔案）。
+  當前最新狀態資料 (state.json)：
+  {state_json_content}
+
+  請依規則檔要求自行審查代碼與 state.json 變更，只把單一 JSON verdict object 覆寫到 `{result_file}`。格式為：
+  {
+    "verdict": "PASS",
+    "checklist": [
+      { "id": 1,  "name": "中斷與殘留防護",        "result": "PASS" },
+      { "id": 2,  "name": "排版與狀態檔結構破壞",   "result": "PASS" },
+      { "id": 3,  "name": "不合理狀態進展",         "result": "PASS" },
+      { "id": 4,  "name": "中間區段被挖空",         "result": "PASS" },
+      { "id": 5,  "name": "思考過程外洩",           "result": "PASS" },
+      { "id": 6,  "name": "語意一致性",             "result": "PASS" },
+      { "id": 7,  "name": "AI偷懶佔位符",           "result": "PASS" },
+      { "id": 8,  "name": "無故刪檔與路徑幻覺",      "result": "PASS" },
+      { "id": 9,  "name": "衝突標記與取代錯位",      "result": "PASS" },
+      { "id": 10, "name": "基礎語法與格式全毀",      "result": "PASS" },
+      { "id": 11, "name": "驗收證據缺失",           "result": "PASS" },
+      { "id": 12, "name": "收斂計數防偽",           "result": "PASS" },
+      { "id": 13, "name": "產出異動卻沒歸零收斂",    "result": "PASS" },
+      { "id": 14, "name": "整合輪越界改葉子",        "result": "PASS" }
+    ],
+    "reason": ""
+  }
+  🚨 限制與規則：
+  1. 輸出必須僅是一個 JSON 物件，不得夾雜任何散文或 HTML 標籤（如 ```json ``` 等包裝也請不要輸出，只寫純 JSON）。
+  2. `verdict` 僅限三種值之一：`"PASS"`、`"REVERT"`、`"FATAL_STATE"`。
+  3. `checklist` 必須精確包含以上 14 項紅線檢查。`result` 僅能是 `"PASS"` 或 `"FLAG"`。如果 `result` 是 `"FLAG"`，則該項物件中必須有 `"evidence"` 欄位以附上具體佐證（例如 檔名:行號 或衝突內容）；如果為 `"PASS"`，則不得有 `"evidence"` 或是將 `"evidence"` 留空。
+  4. 當 `verdict` 是 `"REVERT"` 或 `"FATAL_STATE"` 時，`reason` 必填（人類可讀的原因）；為 `"PASS"` 時，`reason` 必為空字串。
+  5. 寫完判決即停止輸出並結束，不執行 git commit，不修改任何其他檔案。
 
 plan: |
   你正在執行 Loop Engineering【階段②：生成/精修規劃書】（生成輪）。

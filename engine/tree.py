@@ -9,9 +9,8 @@ Chunk 2+ 的 plan_loop / loop 走原平 phase 邏輯，既有行為零變動。
 """
 
 import os
-import re
 import logging
-from state import get_val, set_val
+from state import get_val, set_val, load_state_json, save_state_json, render_all, _state_json_path
 
 logger = logging.getLogger(__name__)
 
@@ -138,27 +137,6 @@ def _append_block(path: str, text: str):
         logger.error(f"Failed to append to {path}: {e}")
 
 
-def _update_global_counts(path: str):
-    """重新計算全局計數（total_nodes, total_leaves, max_depth）。"""
-    nodes, leaves, max_d = 0, 0, 0
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-    except OSError:
-        return
-    for m in re.finditer(r"^\s*node_(\S+?)_state\s*:\s*(\S+)", content, re.MULTILINE):
-        nodes += 1
-        if m.group(2) == LEAF:
-            leaves += 1
-    for m in re.finditer(r"^\s*node_\S+?_depth\s*:\s*(\d+)", content, re.MULTILINE):
-        d = int(m.group(1))
-        if d > max_d:
-            max_d = d
-    set_val(path, "tree_total_nodes", str(nodes))
-    set_val(path, "tree_total_leaves", str(leaves))
-    set_val(path, "tree_max_depth", str(max_d))
-
-
 def add_child(path: str, parent_id: str, child_id: str,
               initial_state: str = PENDING, depends_on: str = "") -> bool:
     parent = get_node(path, parent_id)
@@ -169,69 +147,74 @@ def add_child(path: str, parent_id: str, child_id: str,
         logger.warning(f"Child node '{child_id}' already exists")
         return False
 
+    state_json = _state_json_path(path)
+    data = load_state_json(state_json)
+    if "tree" not in data:
+        data["tree"] = {"root": "root", "nodes": {}}
+    nodes = data["tree"].setdefault("nodes", {})
+    
     parent_depth = parent["depth"]
     child_depth = parent_depth + 1
 
-    # 寫入子節點 k:v block（depends_on=同層兄弟 ID，供執行期依賴排序）
-    _append_block(path, _NODE_BLOCK.format(
-        node_id=child_id, state=initial_state,
-        parent=parent_id, depth=str(child_depth), depends_on=depends_on))
+    # 新增子節點
+    nodes[child_id] = {
+        "state": initial_state,
+        "children": [],
+        "parent": parent_id,
+        "depth": child_depth,
+        "depends_on": [d.strip() for d in depends_on.split(",") if d.strip()],
+        "stable_rounds": 0,
+        "reflow_count": 0
+    }
 
-    # 更新父的 children 清單
-    children = parent["children"]
-    children.append(child_id)
-    set_node_field(path, parent_id, "children", ",".join(children))
+    # 更新父節點的 children
+    parent_node = nodes.get(parent_id)
+    if parent_node:
+        c_list = parent_node.setdefault("children", [])
+        if child_id not in c_list:
+            c_list.append(child_id)
+        if parent_node.get("state") == PENDING:
+            parent_node["state"] = DECOMPOSED
 
-    # 父有子就是 DECOMPOSED（如果還是 PENDING 的話）
-    if parent["state"] == PENDING:
-        set_node_field(path, parent_id, "state", DECOMPOSED)
-
-    _update_global_counts(path)
+    save_state_json(state_json, data)
+    render_all(state_json)
     return True
 
 
 def remove_node(path: str, node_id: str) -> bool:
-    """移除一個節點及其所有子孫。供人類 gate fail-path 的局部重拆用。"""
-    node = get_node(path, node_id)
-    if node is None:
+    """移除一個節點及其所有子孫。"""
+    state_json = _state_json_path(path)
+    if not os.path.exists(state_json):
+        return False
+    data = load_state_json(state_json)
+    nodes = data.get("tree", {}).get("nodes", {})
+    if node_id not in nodes:
         return False
 
-    # 先遞迴移除所有子孫
-    for child_id in node["children"]:
-        remove_node(path, child_id)
+    def _get_descendants(nid):
+        desc = []
+        node = nodes.get(nid, {})
+        for c in node.get("children", []):
+            desc.append(c)
+            desc.extend(_get_descendants(c))
+        return desc
+
+    to_remove = [node_id] + _get_descendants(node_id)
 
     # 從父的 children 清單移除自己
-    parent_id = node.get("parent") if isinstance(node.get("parent"), str) else ""
-    if parent_id:
-        parent = get_node(path, parent_id)
-        if parent:
-            new_children = [c for c in parent["children"] if c != node_id]
-            set_node_field(path, parent_id, "children", ",".join(new_children))
+    node = nodes.get(node_id)
+    if node:
+        parent_id = node.get("parent")
+        if parent_id and parent_id in nodes:
+            parent = nodes[parent_id]
+            parent["children"] = [c for c in parent.get("children", []) if c != node_id]
 
-    # 移除該節點的所有 k:v 行
-    prefix = f"node_{node_id}_"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        # 也移除節點的註解標題行
-        comment_marker = f"# ── 節點：{node_id} ──"
-        out = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith(prefix.replace("_", "_", 1)):
-                # 匹配 node_{id}_* 的 k:v 行
-                if re.match(rf"^\s*node_{re.escape(node_id)}_\w+\s*:", line):
-                    continue
-            if comment_marker in stripped:
-                continue
-            out.append(line)
-        with open(path, "w", encoding="utf-8") as f:
-            f.writelines(out)
-    except OSError as e:
-        logger.error(f"Failed to remove node {node_id}: {e}")
-        return False
+    for r_id in to_remove:
+        if r_id in nodes:
+            del nodes[r_id]
 
-    _update_global_counts(path)
+    save_state_json(state_json, data)
+    render_all(state_json)
     return True
 
 
@@ -239,16 +222,14 @@ def remove_node(path: str, node_id: str) -> bool:
 
 def _iter_node_ids(path: str):
     """yield 所有節點 ID。"""
-    if not os.path.exists(path):
+    state_json = _state_json_path(path)
+    if not os.path.exists(state_json):
         return
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                m = re.match(r"^\s*node_(\S+?)_state\s*:", line)
-                if m:
-                    yield m.group(1)
-    except OSError:
-        return
+    data = load_state_json(state_json)
+    nodes = data.get("tree", {}).get("nodes", {})
+    for nid in nodes.keys():
+        yield nid
+
 
 
 def list_leaves(path: str) -> list[str]:

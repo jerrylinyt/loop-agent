@@ -41,29 +41,7 @@ except (AttributeError, ValueError):
     pass
 
 
-def has_human_commits(start_sha: str, end_sha: str) -> bool:
-    if start_sha == end_sha:
-        return False
-    try:
-        res = subprocess.run(["git", "log", "--format=%s", f"{start_sha}..{end_sha}"], capture_output=True, text=True)
-        if res.returncode != 0:
-            return False
-        for line in res.stdout.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            is_agent = (
-                (line.startswith("R") and " | " in line) or
-                line.startswith("loop-autocommit:") or
-                line.startswith("chore:") or
-                line.startswith("Revert") or
-                line.startswith("Merge")
-            )
-            if not is_agent:
-                return True
-        return False
-    except OSError:
-        return False
+# has_human_commits was removed as it is no longer needed
 
 
 def _load_review_verdict(result_file: str) -> dict | None:
@@ -80,63 +58,91 @@ def _load_review_verdict(result_file: str) -> dict | None:
 
 def _review_checklist_valid(verdict: dict) -> bool:
     checklist = verdict.get("checklist")
-    if not isinstance(checklist, list) or len(checklist) < 6:
+    if not isinstance(checklist, list) or len(checklist) != 14:
         return False
     for item in checklist:
         if not isinstance(item, dict):
             return False
-        status = str(item.get("status", "")).upper()
-        if status not in ("PASS", "FLAG"):
+        # 剛性檢查欄位
+        if "id" not in item or not item.get("name"):
             return False
-        if not str(item.get("item", "")).strip():
+        res = str(item.get("result", "")).upper()
+        if res not in ("PASS", "FLAG"):
+            return False
+        if res == "FLAG" and not str(item.get("evidence", "")).strip():
             return False
     return True
 
 
-def run_git_review_gate(cfg: dict, control: str, log_both) -> tuple[bool, bool]:
-    """獨立的 Git Review Gate：審查 last_safe_sha 到 HEAD 的 Diff。
-    回傳 (通過與否, 是否因人類干預而需停機)。"""
+def run_git_review_gate(cfg: dict, control: str, log_both) -> tuple[bool, str, str]:
+    """獨立的 Git Review Gate：審查 last_safe_sha 到 HEAD 的 Diff 與 state.json 變更。
+    回傳 (通過與否, 停止原因代碼, 停止詳細訊息)。若不需停機，後兩者為空字串。"""
+    from state import _state_json_path, render_all
     state_dir = cfg["runtime"]["state_dir"]
     
     # 取得目前的 HEAD
     res = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True)
     if res.returncode != 0:
-        return True, False
+        return True, "", ""
     current_head = res.stdout.strip()
     
     # 讀取 last_safe_sha
-    last_safe_sha = get_val(control, "last_safe_sha") or ""
+    last_safe_sha = (get_val(control, "last_safe_sha") or "").strip()
             
     if not last_safe_sha:
         # 第一次執行，將目前的 HEAD 當作基準
         set_val(control, "last_safe_sha", current_head)
-        return True, False
+        return True, "", ""
         
-    if last_safe_sha == current_head:
-        return True, False
+    # 支援長短 SHA 比較：統一以較短的 SHA 長度進行比對（最少 4 碼，否則精確比對）
+    is_same_sha = False
+    if last_safe_sha and current_head:
+        min_len = min(len(last_safe_sha), len(current_head))
+        if min_len >= 4:
+            is_same_sha = (last_safe_sha[:min_len] == current_head[:min_len])
+        else:
+            is_same_sha = (last_safe_sha == current_head)
+    else:
+        is_same_sha = (last_safe_sha == current_head)
+        
+    if is_same_sha:
+        return True, "", ""
         
     res = subprocess.run(["git", "diff", last_safe_sha, current_head], capture_output=True, text=True)
     diff = res.stdout.strip()
     if not diff:
         set_val(control, "last_safe_sha", current_head)
-        return True, False
+        return True, "", ""
         
-    log_both("  🔍 [Git Review Gate] 啟動，審查未驗證的 Commit...")
+    log_both("  🔍 [Git Review Gate] 啟動，審查未驗證的 Commit 與 state.json...")
     prompt_template = cfg.get("agent", {}).get("prompts", {}).get("git_review", "")
     if not prompt_template:
-        return True, False
+        return True, "", ""
         
     control_files = [cf for cf in expand_control_files(cfg) if os.path.exists(cf)]
     control_files_str = "\n".join(f"- {cf}" for cf in control_files) if control_files else "- (無狀態檔或無法讀取)"
         
     result_file = os.path.join(state_dir, "git_review_result")
-    diff_ref = f"omitted; run `git diff {last_safe_sha} {current_head}` if needed"
-    prompt = prompt_template.replace("{diff_content}", diff_ref)\
-                            .replace("{diff_range}", f"git diff {last_safe_sha} {current_head}")\
-                            .replace("{control_contents}", control_files_str)\
-                            .replace("{control_files}", control_files_str)\
-                            .replace("{result_file}", result_file)
-                            
+    
+    # 讀取 state.json 內容傳遞給審查 Agent
+    state_json = _state_json_path(control)
+    state_json_content = ""
+    if os.path.exists(state_json):
+        try:
+            with open(state_json, "r", encoding="utf-8") as f:
+                state_json_content = f.read()
+        except OSError:
+            pass
+
+    prompt = fmt_prompt(prompt_template,
+                        diff_content=diff,  # 實質提供完整 diff 供獨立審查
+                        diff_range=f"git diff {last_safe_sha} {current_head}",
+                        control_contents=control_files_str,
+                        control_files=control_files_str,
+                        result_file=result_file,
+                        state_json_content=state_json_content,
+                        control=control)
+                             
     model = cfg.get("agent", {}).get("models", {}).get("review", "")
     if not model:
         model = select_model(cfg, "review", 0)
@@ -158,78 +164,91 @@ def run_git_review_gate(cfg: dict, control: str, log_both) -> tuple[bool, bool]:
     def _write_streak(n: int):
         set_val(control, "review_invalid_streak", str(n))
 
+    # 校驗判決
+    is_valid = True
+    reason = ""
+    decision = ""
+    
     if verdict is None:
+        is_valid = False
         reason = "Git Review Gate did not write valid JSON verdict."
     else:
         decision = str(verdict.get("verdict", "")).upper()
         reason = str(verdict.get("reason", "")).strip()
-        if decision in ("REVERT", "FATAL_STATE"):
+        
+        if decision not in ("PASS", "REVERT", "FATAL_STATE"):
+            is_valid = False
+            reason = f"Git Review Gate verdict value '{decision}' is invalid (must be PASS, REVERT, or FATAL_STATE)."
+        elif not _review_checklist_valid(verdict):
+            is_valid = False
+            reason = "Git Review Gate checklist format is invalid (must be exactly 14 items, and FLAG items must have evidence)."
+        elif decision in ("REVERT", "FATAL_STATE") and not reason:
+            is_valid = False
+            reason = f"Git Review Gate verdict is {decision} but reason is empty."
+
+    if not is_valid:
+        streak = _read_streak() + 1
+        _write_streak(streak)
+        limit = cfg.get("oscillation", {}).get("enhanced_max_rounds", 8)
+        log_both(f"  [Git Review Gate] Invalid JSON verdict: {reason} (streak={streak})")
+        if streak >= limit:
             _write_streak(0)
-            is_fatal = decision == "FATAL_STATE"
-            log_both(f"  [Git Review Gate] verdict={decision}: {reason}")
+            append_round_record(cfg, {
+                "run_id": cfg.get("run_id"),
+                "ts": datetime.now().strftime("%F %T"),
+                "type": "human_required",
+                "message": f"Git Review Gate failed to produce valid JSON verdict {streak} times consecutively."
+            })
+            return False, "agent_requested", f"Git Review Gate failed to produce valid JSON verdict {streak} times consecutively."
+        return False, "", ""
 
-            if is_fatal:
-                append_round_record(cfg, {
-                    "run_id": cfg.get("run_id"),
-                    "ts": datetime.now().strftime("%F %T"),
-                    "type": "human_required",
-                    "message": f"Git Review Gate fatal state: {reason}"
-                })
-                return False, True
+    # 有效判決處理
+    _write_streak(0)
+    if decision in ("REVERT", "FATAL_STATE"):
+        is_fatal = decision == "FATAL_STATE"
+        log_both(f"  [Git Review Gate] verdict={decision}: {reason}")
 
-            if has_human_commits(last_safe_sha, current_head):
-                append_round_record(cfg, {
-                    "run_id": cfg.get("run_id"),
-                    "ts": datetime.now().strftime("%F %T"),
-                    "type": "human_required",
-                    "message": f"Git Review Gate human conflict: {reason}"
-                })
-                return False, True
+        if is_fatal:
+            append_round_record(cfg, {
+                "run_id": cfg.get("run_id"),
+                "ts": datetime.now().strftime("%F %T"),
+                "type": "human_required",
+                "message": f"Git Review Gate fatal state: {reason}"
+            })
+            return False, "agent_requested", f"Git Review Gate fatal state: {reason}"
 
-            revert_res = subprocess.run(["git", "revert", "--no-edit", f"{last_safe_sha}..{current_head}"])
-            if revert_res.returncode != 0:
-                subprocess.run(["git", "revert", "--abort"])
-                append_round_record(cfg, {
-                    "run_id": cfg.get("run_id"),
-                    "ts": datetime.now().strftime("%F %T"),
-                    "type": "review_revert",
-                    "message": f"Git Revert failed due to merge conflicts: {reason}"
-                })
-                return False, True
-
+        revert_res = subprocess.run(["git", "revert", "--no-edit", f"{last_safe_sha}..{current_head}"])
+        if revert_res.returncode != 0:
+            subprocess.run(["git", "revert", "--abort"])
+            subprocess.run(["git", "reset", "--hard", last_safe_sha])
+            subprocess.run(["git", "clean", "-fd"])
             append_round_record(cfg, {
                 "run_id": cfg.get("run_id"),
                 "ts": datetime.now().strftime("%F %T"),
                 "type": "review_revert",
-                "message": f"Git Review Gate reverted changes. Reason: {reason}"
+                "message": f"Git Revert failed, performed hard reset to {last_safe_sha}. Reason: {reason}"
             })
-            return False, False
+            state_json = _state_json_path(control)
+            if os.path.exists(state_json):
+                render_all(state_json)
+            return False, "", ""
 
-        if decision == "PASS" and _review_checklist_valid(verdict):
-            _write_streak(0)
-            set_val(control, "last_safe_sha", current_head)
-            log_both("  [Git Review Gate] JSON verdict PASS.")
-            return True, False
-
-        if decision == "PASS":
-            reason = "Git Review Gate PASS verdict missing valid checklist."
-        elif not reason:
-            reason = f"Git Review Gate invalid verdict: {decision or ''}."
-
-    streak = _read_streak() + 1
-    _write_streak(streak)
-    limit = cfg.get("oscillation", {}).get("enhanced_max_rounds", 8)
-    log_both(f"  [Git Review Gate] Invalid JSON verdict: {reason} (streak={streak})")
-    if streak >= limit:
-        _write_streak(0)
         append_round_record(cfg, {
             "run_id": cfg.get("run_id"),
             "ts": datetime.now().strftime("%F %T"),
-            "type": "human_required",
-            "message": f"Git Review Gate failed to produce valid JSON verdict {streak} times consecutively."
+            "type": "review_revert",
+            "message": f"Git Review Gate reverted changes. Reason: {reason}"
         })
-        return False, True
-    return False, False
+        state_json = _state_json_path(control)
+        if os.path.exists(state_json):
+            render_all(state_json)
+        return False, "", ""
+
+    if decision == "PASS":
+        set_val(control, "last_safe_sha", current_head)
+        log_both("  [Git Review Gate] JSON verdict PASS.")
+        return True, "", ""
+
 
 
 def update_stuck_state(cfg: dict, control: str, log_both, *, fail_fingerprints, progress: dict,
@@ -435,10 +454,10 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             touch_run_lock(lock_path)    # 鎖心跳：長跑時不被誤判殘留而被搶鎖
         sync_framework_docs(cfg, log_both)
 
-        passed, human_conflict = run_git_review_gate(cfg, control, log_both)
-        if human_conflict:
-            set_human_required(control, True, "git_review_human_conflict", "偵測到人類與 Agent 的 Commit 衝突，停止自動 Revert")
-            log_both("🧑‍⚖️ 偵測到 human_required：因人類與 Agent 衝突，loop 停止。")
+        passed, halt_reason, halt_msg = run_git_review_gate(cfg, control, log_both)
+        if halt_reason:
+            set_human_required(control, True, halt_reason, halt_msg)
+            log_both(f"🧑‍⚖️ 偵測到 human_required：{halt_msg}，loop 停止。")
             return 2
         if not passed:
             log_both("  [Git Review Gate] 已還原，跳過本輪執行以重試。")
@@ -646,10 +665,10 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         sync_framework_docs(cfg, log_both)
 
         # ── 獨立 Git Review Gate：審查上一輪 commit，破壞性改動自動 revert（與平模式一致，稽核 #2）──
-        passed, human_conflict = run_git_review_gate(cfg, control, log_both)
-        if human_conflict:
-            set_human_required(control, True, "git_review_human_conflict", "偵測到人類與 Agent 的 Commit 衝突，停止自動 Revert")
-            log_both("🧑‍⚖️ 偵測到 human_required：Git Review Gate 判定需人類介入，loop 停止。")
+        passed, halt_reason, halt_msg = run_git_review_gate(cfg, control, log_both)
+        if halt_reason:
+            set_human_required(control, True, halt_reason, halt_msg)
+            log_both(f"🧑‍⚖️ 偵測到 human_required：{halt_msg}，loop 停止。")
             return 2
         if not passed:
             log_both("  [Git Review Gate] 已還原/退回，跳過本輪執行以重試。")
