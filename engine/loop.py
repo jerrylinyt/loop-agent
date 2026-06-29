@@ -126,19 +126,15 @@ def run_git_review_gate(cfg: dict, control: str, log_both) -> tuple[bool, bool]:
     if not prompt_template:
         return True, False
         
-    control_contents = []
-    for cf in expand_control_files(cfg):
-        if os.path.exists(cf):
-            try:
-                with open(cf, "r", encoding="utf-8", errors="replace") as f:
-                    control_contents.append(f"=== {cf} ===\n{f.read()}")
-            except OSError:
-                pass
-    control_str = "\n\n".join(control_contents) if control_contents else "(無狀態檔或無法讀取)"
+    control_files = [cf for cf in expand_control_files(cfg) if os.path.exists(cf)]
+    control_files_str = "\n".join(f"- {cf}" for cf in control_files) if control_files else "- (無狀態檔或無法讀取)"
         
     result_file = os.path.join(state_dir, "git_review_result")
-    prompt = prompt_template.replace("{diff_content}", diff)\
-                            .replace("{control_contents}", control_str)\
+    diff_ref = f"omitted; run `git diff {last_safe_sha} {current_head}` if needed"
+    prompt = prompt_template.replace("{diff_content}", diff_ref)\
+                            .replace("{diff_range}", f"git diff {last_safe_sha} {current_head}")\
+                            .replace("{control_contents}", control_files_str)\
+                            .replace("{control_files}", control_files_str)\
                             .replace("{result_file}", result_file)
                             
     model = cfg.get("agent", {}).get("models", {}).get("review", "")

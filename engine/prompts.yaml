@@ -5,7 +5,7 @@
 # 所有方法論（怎麼收斂、何時歸零、何時停機、如何防漏）一律【不在 prompt 重寫】，
 # 改為指向 .loop/rules/ 對應規則——rules 是唯一事實來源，改 rule 不必同步改 prompt。
 #
-# 佔位符（{control} {requirements} {plan_md} {diff_content} {control_contents}
+# 佔位符（{control} {requirements} {plan_md} {diff_range} {control_files}
 # {result_file} {node_id} {decomp_file} {max_files} {max_lines} …）由 config.fmt_prompt()
 # 以 str.replace 代入；未代入的 {xxx} 會原樣留下，故只用引擎實際會帶入的 key。
 #
@@ -26,24 +26,14 @@ escalation: |
 
 git_review: |
   你正在執行 Loop Engineering 的【獨立 Git Review Gate】（全新 context，只審不寫 code）。
-  目標：審查上一次的 Commit Diff 是否合理，並驗證核心狀態檔是否遭到破壞，防止 Agent 幻覺搞砸大腦。
-  讀取：.loop/rules/git-review-gate.md 的檢查規則。
-  輸入 Diff 如下：
-  {diff_content}
+  目標：審查上一次的 Commit Diff 是否合理，並驗證核心狀態檔是否遭到破壞。
 
-  目前狀態檔的完整內容如下：
-  {control_contents}
+  必讀規則：.loop/rules/git-review-gate.md
+  Diff 範圍：{diff_range}
+  核心狀態檔路徑：
+  {control_files}
 
-  Write exactly one JSON object to `{result_file}`. The engine accepts only this JSON contract:
-  {
-    "verdict": "PASS" | "REVERT" | "FATAL_STATE",
-    "reason": "short human-readable reason",
-    "checklist": [
-      {"item": "review gate checklist item", "status": "PASS" | "FLAG", "note": "optional evidence"}
-    ]
-  }
-  For PASS, `checklist` must contain at least 6 objects and every status must be PASS or FLAG.
-  For REVERT or FATAL_STATE, include the blocking reason and the same checklist shape.
+  請依規則檔要求自行讀取 diff 與必要狀態檔，只把單一 JSON verdict object 覆寫到 `{result_file}`。
   🚨 寫完判決即停止輸出、不做任何額外動作（不執行 git commit、不修改任何其他檔案）。
 
 plan: |
