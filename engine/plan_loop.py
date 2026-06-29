@@ -35,6 +35,12 @@ from utils import (
 
 logger = logging.getLogger(__name__)
 
+try:                          # Windows 主控台 cp950 → 強制 UTF-8 輸出
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
+
 PLAN_SEED = """# 📐 PLAN — 規劃書生成控制（階段②，由 plan_loop.py 驅動）
 
 > 文件即狀態:記錄「規劃書」收斂進度。規劃書本體在 .loop/{{loop.config.yaml, CONTROL.md, phases/}}。

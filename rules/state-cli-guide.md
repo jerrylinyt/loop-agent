@@ -24,15 +24,15 @@
 在每一輪結束前，必須使用以下三個指令更新本輪的執行模式與結果：
 - **設定本輪模式** (`推進` 或 `驗證`)：
   ```bash
-  {state_cli} set control.last_round_mode 推進
+  {state_cli} set last_round_mode 推進
   ```
 - **設定本輪結果** (`PASS`、`FAIL` 或 `NA`)：
   ```bash
-  {state_cli} set control.last_round_result PASS
+  {state_cli} set last_round_result PASS
   ```
 - **設定失敗任務**（如果有任務失敗被退回，填入任務 ID，多個以逗號分隔；若 PASS 則填空字串 `""`）：
   ```bash
-  {state_cli} set control.last_round_fail_tasks "TASK-02"
+  {state_cli} set last_round_fail_tasks "TASK-02"
   ```
 
 ### 2.2 設定其他控制變數
@@ -50,7 +50,7 @@
   ```
 - **遭遇卡死需升級交給人類**：
   ```bash
-  {state_cli} set control.human_required true
+  {state_cli} set human_required true
   ```
 
 ---
