@@ -36,5 +36,5 @@
 - 結尾請使用者**逐條確認需求**。確認後輸出「REQUIREMENTS CONFIRMED」,提示可進階段②(`1-plan-generator.md`)。
 
 ## 不要做
-- 不要在這一段就開始切階段、寫 CONTROL/phases(那是階段②)。
+- 不要在這一段就開始切階段、寫 `state.json` / `phases` 規劃內容(那是階段②)。
 - 不要腦補需求;不清楚就問,或先記為待確認項。

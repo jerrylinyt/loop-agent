@@ -64,7 +64,7 @@
     - 程式碼是否有極度明顯、會導致編譯或直譯器直接報錯的語法殘缺？
 
 11. **驗收證據缺失 (Acceptance Evidence Missing)**
-    - 本輪是否在 CONTROL 把 `last_round_result` 標 `PASS`、或讓 `p{i}_consecutive_pass` 往上 +1（宣稱推進/收斂）？
+    - 本輪是否在 `state.json` 把 `last_round_result` 標 `PASS`、或讓 `p{i}_consecutive_pass` 往上 +1（宣稱推進/收斂）？
     - 若是，且該任務是「**可驗證的任務**」（有 build/test/編譯器把關，或 boot-sequence STEP 4 要求寫「驗證證據檔」的驗證模式）——請在 diff、commit message、或證據檔（如 `<outputs>/.validate/p{i}-R###.md`）裡找**實際執行的指令與輸出**。
     - 只看到一句「全部 PASS / 全綠 / 已驗證」卻**找不到任何可抽查的指令輸出或證據檔** → REVERT。這與 §2-3「不合理狀態進展」同族：自評 PASS 必須留下證據，否則等同橡皮圖章式的假推進，不得換取收斂計數。
     - ⚠️ 範圍：純分析輪、文件輪、或本輪未宣稱 PASS/未 +1 的輪次,不需要 build/test 原始輸出;但若本輪新增或修改分析結論、規格判斷、任務拆解、驗收項目,仍必須在 diff 中看得到來源 trace（檔:行 / 需求 ID / Issue ID / scratch 重推稿路徑）或任務規格要求的 evidence。
@@ -87,7 +87,7 @@
     - 若是,該任務本輪【必須】conv 歸零(`conv=0`)、且本輪**不得**標 CONVERGED——因為「產出有變」代表
       上一稿不是最終稿,連續一致計數必須重數。Diff 顯示「產出被改」卻同時 `conv` 不歸零 / 直接標 CONVERGED
       → FLAG → REVERT。
-    - ⚠️ 排除:scratch 證據檔(`.reverify/` `.enum/` `.validate/`)、Issue 檔、CONTROL 狀態欄位本身不算
+    - ⚠️ 排除:scratch 證據檔(`.reverify/` `.enum/` `.validate/`)、Issue 檔、`state.json` 狀態欄位本身不算
       「產出異動」;重驗一致那輪本來就會新增這些 scratch 檔,不因此要求歸零。只看**正式產出檔**有沒有被改。
 
 14. **整合輪越界改葉子 (Integration Round Touching Leaf)** ⚠️ 樹模式專屬,垂直震盪逃逸

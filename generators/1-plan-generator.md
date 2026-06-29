@@ -1,4 +1,4 @@
-# 🏗️ GENERATOR — 階段②：生成規劃書（config + CONTROL + phases）
+# 🏗️ GENERATOR — 階段②：生成規劃書（config + state.json + phases）
 
 > **怎麼用**:這份是**每輪的指令**,由 `engine/plan_loop.py` 反覆觸發(規劃書本身是收斂目標)。
 > 輸入 `REQUIREMENTS.md`(已人類確認)+ `rules/BLUEPRINT.md`,**產出這個專案專屬的規劃書**。
@@ -19,13 +19,13 @@
    - `framework_path` 指向共享框架 clone;`workspace.mode` 依需求。
    - ⚠️ **不要動 `agent.build_cmd` / `agent.models`**——這兩項已由人類在 `bootstrap.md` STEP 2 填好實際值
      (preflight 會在這個迴圈啟動前就檢查過,若還是佔位值根本進不到這一輪)。
-   - 🚨 **不需要產出任何 Markdown 狀態檔案（如 `CONTROL.md` 等）**，也嚴禁手動或寫腳本修改 `state.json`。收斂後系統會自動依據你的 `loop.config.yaml` 建立 `state.json` 骨架。你如果需要定義「需求→任務追溯表」或「Coverage 定義」，這些資訊會被直接定義在 `loop.config.yaml`（例如 requirements_map 欄位）或隨後自動寫入 `state.json`。
+   - 🚨 **不需要產出任何 Markdown 狀態檔案**，也嚴禁手動或寫腳本修改 `state.json`。收斂後系統會自動依據你的 `loop.config.yaml` 建立 `state.json` 骨架。你如果需要定義「需求→任務追溯表」或「Coverage 定義」，這些資訊會被直接定義在 `loop.config.yaml`（例如 requirements_map 欄位）或隨後自動寫入 `state.json`。
 2. **`phases/PHASE1.md … PHASEn.md`**（填 `templates/PHASE.template.md`）
    - 每階段一份,把該階段的任務逐一寫成「依賴讀取 / 做什麼 / 產出位置 / 驗證標準」。
    - 數量 = config.phases 數。
 
 ## 必須落實的規劃原則（對映 BLUEPRINT 第七部）
-- **需求全覆蓋**:每條 R### 至少對應一個任務。在 CONTROL 放一張「需求→任務」追溯表。
+- **需求全覆蓋**:每條 R### 至少對應一個任務。把「需求→任務」追溯資訊定義在 `loop.config.yaml` / `state.json` 可讀取的結構欄位中。
 - **任務粒度**:每個任務「一輪可完成」;太大就拆。
 - **依賴無循環**:階段/任務依賴是 DAG。
 - **收斂安排**:不信單次的任務 → 指定收斂層級與門檻(convergence.md);大範圍怕漏的任務 → 套 completeness.md(列舉清單 + 行覆蓋 + 集合穩定收斂)。
@@ -33,12 +33,12 @@
 - **逃生門**:震盪/卡死門檻、FROZEN、human_required 就位(oscillation-escalation.md)。
 
 ## Context 防爆（生成時就把關，見 context-budget.md F）
-- CONTROL 保持「決策最小集」:執行日誌移出(進 loop.log)、Issue 一檔一個只留索引、產出一檔一主題。
+- `state.json` 保持「決策最小集」:只放引擎/agent 需要判讀的結構化狀態；執行日誌移出(進 loop.log)、Issue 一檔一個只留索引、產出一檔一主題。
 - 任務的「依賴讀取」要**最小且具體**(只讀哪幾個檔、哪幾行),不可出現「讀整個 outputs 檢視」這種任務。
 - 設好 log rotation / control_max_bytes。
 
 ## 重生 / 需求變更（diff 模式）
-- 若是「需求變更回流」而非首次生成:**diff 模式**——只改受影響的 config/CONTROL/phases 段落,不整碗重寫;把受影響任務改 `NEEDS_REVISION`;`plan_version++` 並打 tag `plan-v{n}`。
+- 若是「需求變更回流」而非首次生成:**diff 模式**——只改受影響的 `loop.config.yaml` / `state.json` / `phases` 段落,不整碗重寫;把受影響任務改 `NEEDS_REVISION`;`plan_version++` 並打 tag `plan-v{n}`。
 
 ## 產出後
 - 不要在這一輪自審。下一輪(獨立 context)會依 `2-plan-review-gate.md` 審查;

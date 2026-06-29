@@ -2,7 +2,7 @@
 """
 loop.py — 通用 Loop Engineering 執行引擎（config 驅動、支援 N 階段）。
 
-反覆觸發 coding agent 跑 CONTROL.md，偵測「改A壞B」震盪、自動三層升級模型（預設→增強→人類）。
+反覆觸發 coding agent 依 state.json 與 phases 規格執行，偵測「改A壞B」震盪、自動三層升級模型（預設→增強→人類）。
 """
 
 import os

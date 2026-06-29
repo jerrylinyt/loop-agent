@@ -23,7 +23,7 @@
           (列舉清單 + 行覆蓋 + 集合穩定收斂)。
 □ 逃生門就位:oscillation 門檻、FROZEN、human_required 都已設定。
 □ Context 防爆(context-budget.md):無任何「會無限長大且會被每輪讀進 context」的設計——
-            執行日誌移出 CONTROL、Issue/產出分散成檔、log rotation 已設、
+            執行日誌移出 `state.json`、Issue/產出分散成檔、log rotation 已設、
             每輪讀取預算明確、沒有「整批讀資料來檢視」的任務。
 □ 框架唯讀邊界:沒有任務會寫入 framework_path;寫入白名單只含 .loop/ 與工作區。
 □ 引擎可讀性:config 能被引擎解析(phases 有 id、最後一筆=最終階段;stop_condition 欄位齊全)。

@@ -95,7 +95,7 @@ STEP 7 ▶ 執行「STEP 4 挑定的那【唯一一個】任務」/ 該輪那一
 STEP 8 ▶ 產出落地到 config.phases[current_phase].output。
          發現前人或前階段規格錯誤 → 修改該檔 + 寫「修正記錄」(issues.md)。
 
-STEP 9 ▶ 更新狀態。狀態唯一的單一事實來源為 state.json，**嚴禁手動編輯 CONTROL.md 的 YAML 或狀態表格**。
+STEP 9 ▶ 更新狀態。狀態唯一的單一事實來源為 state.json，**嚴禁手動編輯任何舊版 Markdown 控制檔或直接修改 state.json 本體**。
          你必須一律呼叫系統提供的 `{state_cli}` 工具更新狀態（完整命令操作指引與範例請務必閱讀並依據 .loop/rules/state-cli-guide.md 執行），例如：
            · 推進模式下任務狀態變更：呼叫 `{state_cli} task-status --phase <phase> --task <task> --to DRAFTED` 
            · 任務收斂增加計數：呼叫 `{state_cli} task-conv --phase <phase> --task <task> --incr`
@@ -124,7 +124,7 @@ STEP C ▶ 【Git 提交 — 本輪的還原點】(只在工作區 / code repo)
          (注意:下一輪是外部引擎重新喚醒的【另一個全新無狀態 process】,不是你接著跑)。
 
 STEP 10 ▶ 把本輪詳細日誌 append 到 loop.log(人看,agent 不回讀);
-          CONTROL 內只更新最近一筆摘要。
+          若保留人類摘要視圖，也只能更新最近一筆摘要，不能把它當成機器判讀來源。
           ┌──────────────────────────────────────────────────────────┐
           │ 🚨 強制停機（本輪終點，物理動作，不可省略）:               │
           │ 完成 STEP C 的 commit 後,必須【立即停止輸出並中斷本次對話   │
@@ -138,4 +138,4 @@ STEP 10 ▶ 把本輪詳細日誌 append 到 loop.log(人看,agent 不回讀);
 ══════════════════════════════════════════════════════
 ```
 
-**Context 管理鐵則(見 context-budget.md)**:每輪固定只全讀 CONTROL + 當輪 phase 那一節 + 當輪用到的那一份 rules + 任務宣告的少數依賴檔。其餘一律不載入。
+**Context 管理鐵則(見 context-budget.md)**:每輪固定只全讀 `state.json` + 當輪 phase 那一節 + 當輪用到的那一份 rules + 任務宣告的少數依賴檔。其餘一律不載入。

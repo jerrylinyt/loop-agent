@@ -1,10 +1,10 @@
 # 📋 PHASE<n> — <階段名稱> 任務規格
 
-> **僅當 CONTROL `current_phase == <n>` 時讀此檔。**
+> **僅當 `state.json` 中 `current_phase == <n>` 時讀此檔。**
 > **只讀你本輪要做的那一個 TASK 小節**,不要整檔讀完(省 context,見 framework rules/context-budget.md)。
-> 狀態表、計數器、Coverage、通用協定都在 CONTROL.md / framework rules。
+> 狀態、計數器、Coverage、通用協定都以 `state.json` / framework rules 為準。
 >
-> 🔁 收斂:本階段任務依 CONTROL 引用的 `convergence.md`——初稿後做「獨立重驗」(先不看舊文件、從來源重推一份再對比),有實質差異就修正並把 conv 歸零,連續達門檻才 CONVERGED。
+> 🔁 收斂:本階段任務依 `state.json` 與 `convergence.md` 定義——初稿後做「獨立重驗」(先不看舊文件、從來源重推一份再對比),有實質差異就修正並把 conv 歸零,連續達門檻才 CONVERGED。
 > 大範圍怕漏的任務另套 `completeness.md`(列舉清單 + 行覆蓋 + 集合穩定收斂)。
 > 每輪結束別忘 BOOT STEP C:`git add -A && git commit`(只在工作區)。
 

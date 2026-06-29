@@ -31,42 +31,18 @@ FRAMEWORK = os.path.dirname(os.path.abspath(__file__))
 
 
 def parse_control_file(control_path: str) -> tuple[str, str]:
-    """解析狀態檔案以獲取 current_phase 與 stuck_level 變數"""
-    base_dir = os.path.dirname(control_path)
-    state_json = os.path.join(base_dir, "state.json")
-    if not os.path.exists(state_json) and control_path.endswith("state.json"):
-        state_json = control_path
-        
-    if os.path.exists(state_json):
-        try:
-            import json
-            with open(state_json, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            current_phase = str(data.get("current_phase", "-"))
-            stuck_level = str(data.get("control", {}).get("stuck_level", "-"))
-            return current_phase, stuck_level
-        except Exception:
-            pass
-
-    # Fallback to CONTROL.md
-    current_phase = "-"
-    stuck_level = "-"
-    if os.path.exists(control_path):
-        try:
-            with open(control_path, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    line = line.strip()
-                    if "#" in line:
-                        line = line.split("#", 1)[0].strip()
-                    if line.startswith("current_phase:"):
-                        current_phase = line.split(":", 1)[1].strip().strip("'\"")
-                    elif line.startswith("stuck_level:"):
-                        stuck_level = line.split(":", 1)[1].strip().strip("'\"")
-        except Exception:
-            pass
-    return current_phase, stuck_level
-
-
+    """????????? current_phase ? stuck_level ??"""
+    if not os.path.exists(control_path):
+        return "-", "-"
+    try:
+        import json
+        with open(control_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        current_phase = str(data.get("current_phase", "-"))
+        stuck_level = str(data.get("control", {}).get("stuck_level", "-"))
+        return current_phase, stuck_level
+    except Exception:
+        return "-", "-"
 
 def get_worktrees() -> list[dict]:
     """呼叫 git worktree list --porcelain 並解析"""

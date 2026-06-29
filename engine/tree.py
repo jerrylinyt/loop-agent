@@ -4,7 +4,7 @@ tree.py — 拆解＝驗證同構樹的狀態表示與持久化。
 樹是 opt-in：不存在 TREE.md 時 tree_enabled() 回 False，
 Chunk 2+ 的 plan_loop / loop 走原平 phase 邏輯，既有行為零變動。
 
-持久化用既有單行 k:v 風格（與 CONTROL.md / PLAN.md 同機制），
+持久化使用 state.json（與統一狀態機制相同），
 引擎用 state.get_val / state.set_val 讀寫，不把整棵樹塞進 LLM context。
 """
 
@@ -47,7 +47,7 @@ def tree_enabled(cfg: dict) -> bool:
 _TREE_HEADER = """\
 # 🌱 TREE — 拆解＝驗證同構樹狀態（引擎專用，不入 LLM context）
 
-> 持久化格式：單行 k:v，與 CONTROL.md 同機制。
+> 持久化格式：state.json。
 > 引擎用 state.get_val / set_val 讀寫個別欄位。
 
 ```yaml

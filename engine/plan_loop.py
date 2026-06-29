@@ -58,27 +58,19 @@ plan_human_required: false
 
 
 def plan_md_path(cfg):
-    return os.path.join(os.path.dirname(cfg["control"]) or ".", "PLAN.md")
+    return cfg["control"]
 
 
 def seed_plan(path):
-    if not os.path.exists(path):
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(PLAN_SEED)
-            return True
-        except OSError as e:
-            logger.error(f"Failed to write PLAN seed: {e}")
     return False
 
 
 def plan_files_changed(cfg):
-    """Round A 的 git 改動是否觸及『規劃書檔』(.loop/ 下,排除 PLAN/log/state)。"""
+    """Round A 的 git 改動是否觸及『規劃書檔』(.loop/ 下,排除 state.json/log)。"""
     if not in_git_repo():
         return None  # 無 git → 交由 agent 回填的 plan_changed_last 判斷
     loop_dir = os.path.dirname(cfg["control"]).replace("\\", "/") or "."
-    exclude = ("PLAN.md", "plan.log", "loop.log")
+    exclude = ("state.json", "plan.log", "loop.log")
     for c in changed_files():
         cn = c.replace("\\", "/")
         if not cn.startswith(loop_dir + "/"):

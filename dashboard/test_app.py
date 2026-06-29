@@ -71,11 +71,13 @@ def test_parse_index_stale_lock(monkeypatch):
 
 def test_set_control_val_and_parse():
     with tempfile.TemporaryDirectory() as tmpdir:
-        control_path = os.path.join(tmpdir, "CONTROL.md")
+        control_path = os.path.join(tmpdir, "state.json")
         with open(control_path, "w", encoding="utf-8") as f:
-            f.write("current_phase: 1\n")
-            f.write("human_required: true\n")
-            f.write("p1_consecutive_pass: 3\n")
+            json.dump({
+                "current_phase": "1",
+                "control": {"human_required": True},
+                "phases": [{"id": 1, "consecutive_pass": 3}]
+            }, f)
             
         # Parse it
         data = parse_control_file(control_path)
@@ -93,10 +95,14 @@ def test_set_control_val_and_parse():
         
 def test_parse_control_threshold_normalization():
     with tempfile.TemporaryDirectory() as tmpdir:
-        control_path = os.path.join(tmpdir, "CONTROL.md")
+        control_path = os.path.join(tmpdir, "state.json")
         with open(control_path, "w", encoding="utf-8") as f:
-            f.write("p1_consecutive_pass: 1\n")
-            f.write("p2_consecutive_pass: 2\n")
+            json.dump({
+                "phases": [
+                    {"id": 1, "consecutive_pass": 1},
+                    {"id": 2, "consecutive_pass": 2}
+                ]
+            }, f)
         # config: phase 1 numeric threshold, phase 2 placeholder string
         with open(os.path.join(tmpdir, "loop.config.yaml"), "w", encoding="utf-8") as f:
             f.write("phases:\n")
@@ -646,9 +652,9 @@ def test_stop_request_and_human_details():
         assert not os.path.exists(stop_file)
         
         # 2. Test YAML frontmatter auto insertion in set_val
-        control_path = os.path.join(tmpdir, "CONTROL.md")
+        control_path = os.path.join(tmpdir, "state.json")
         with open(control_path, "w", encoding="utf-8") as f:
-            f.write("# Frontmatter\n```yaml\ncurrent_phase: 1\n```\n# End\n")
+            json.dump({"current_phase": "1", "control": {}}, f)
             
         # Key missing initially
         assert get_val(control_path, "human_required_reason") is None
@@ -708,9 +714,16 @@ def test_dashboard_human_context_endpoint(monkeypatch):
             f.write("|------|------|-----------|-------|-------|------|------|\n")
             f.write(f"| my-repo | {repo_path} | default | 1 | 0 | tracked | t |\n")
             
-        control_path = os.path.join(repo_path, ".loop", "default", "CONTROL.md")
+        control_path = os.path.join(repo_path, ".loop", "default", "state.json")
         with open(control_path, "w", encoding="utf-8") as f:
-            f.write("# Control\n```yaml\ncurrent_phase: 1\nhuman_required: true\nhuman_required_reason: stuck_level_2_hard_stop\nhuman_required_msg: Stuck level 2 hit!\n```\n# End\n")
+            json.dump({
+                "current_phase": "1",
+                "control": {
+                    "human_required": True,
+                    "human_required_reason": "stuck_level_2_hard_stop",
+                    "human_required_msg": "Stuck level 2 hit!"
+                }
+            }, f)
             
         monkeypatch.setattr("dashboard.app.get_index_path", lambda: index_path)
         
@@ -731,9 +744,9 @@ def test_dashboard_human_context_endpoint(monkeypatch):
         r2 = client.post(f"/api/projects/{proj_id}/resume")
         assert r2.status_code == 200
         
-        # Check CONTROL.md was updated
+        # Check state.json was updated
         with open(control_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        assert "human_required: false" in content
-        assert "human_required_reason:" in content
-        assert "human_required_msg:" in content
+            content = json.load(f)
+        assert content["control"]["human_required"] is False
+        assert content["control"]["human_required_reason"] == ""
+        assert content["control"]["human_required_msg"] == ""

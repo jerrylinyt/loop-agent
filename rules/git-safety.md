@@ -6,7 +6,7 @@
 ## 1. 核心機制
 - **一輪一 commit**(BOOT STEP C):每輪結束提交一次,訊息含 Round/Phase/Task。每個 commit 都是乾淨還原點。
 - **Git Review Gate (獨立審查)**:由引擎在下一輪執行前，自動攔截並呼叫獨立的審查 Agent (參考 `git-review-gate.md`)。專門審查上一次的 Commit Diff 是否合理。發現破壞性改動即自動 Revert。
-- **局部編輯優先**:改主控檔/規格檔用局部取代,不整檔重寫,從源頭降低「變白」機率。寫完讀回確認。
+- **局部編輯優先**:改 `state.json` / 規格檔時用局部取代或經工具原子更新,不整檔重寫,從源頭降低「變白」機率。寫完讀回確認。
 
 ## 2. 安全紅線（絕不做）
 - ❌ `git reset --hard`、`git clean -fd/-fdx`、`git checkout .`（無差別覆蓋,會吃掉本輪以外的好東西）
@@ -23,7 +23,7 @@
 1. 優先用「targeted edit / 局部取代」,避免整檔重寫。
 2. 每次寫完立刻讀回確認:非空、結構完整。
 3. 若發現自己把檔案寫壞且「尚未 commit」→ `git checkout -- <檔>` 還原後重做。
-4. **寫入白名單**:只允許寫本專案 `.loop/` (CONTROL/phases/config/log) 與工作區的產出，嚴禁破壞既有輸入檔。
+4. **寫入白名單**:只允許寫本專案 `.loop/` (`state.json` / phases / config / log) 與工作區的產出，嚴禁破壞既有輸入檔。
    - ❌ `.loop/*/inputs/` 是**唯讀參考輸入**(常是別的專案用 `git worktree` 掛進來的):嚴禁寫入/修改/刪除。它在工作區的 git 樹之外、又被 `.gitignore`,安全網救不回它——要的資訊用讀的,要改只能改本專案。
    - ❌ 嚴禁寫入工作區(cwd)以外的任何路徑(例如別的 code repo)。即使你的 CLI 被設定成「讀得到」更廣的範圍,那也只開放讀;**寫入一律留在本專案**,因為還原點 / review-gate 只保護本專案這一個 git 樹。
 
@@ -44,7 +44,7 @@ dist/  build/      # 建置產物
 .loop/.loop_state/ # 震盪偵測狀態(引擎用,不進版控也不進 context)
 .DS_Store
 ```
-> 輸入、產出、`.loop/` 內的 CONTROL/phases/config 都要進版控。只有相依、建置產物、log、loop_state 忽略。
+> 輸入、產出、`.loop/` 內的 `state.json` / phases / config 都要進版控。只有相依、建置產物、log、loop_state 忽略。
 
 ## 7. commit 訊息格式
 ```

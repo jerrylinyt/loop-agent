@@ -55,7 +55,7 @@ RE-VERIFY（當任務 status==DRAFTED 且 conv<threshold）:
 > 走第 4 步(修正 + conv=0 + 寫修正記錄),不得走第 5 步 +1。
 > ❌ 嚴禁:同一輪既改了產出、又 conv += 1 或直接標 CONVERGED(自稱「只是順手潤一下、不算實質差異」)。
 > 有改就是有差異——歸零重數。此鐵則由 git-review-gate §2-13 獨立把關,違者 REVERT。
-> (排除:scratch 證據檔 `.reverify/.enum/.validate`、Issue 檔、CONTROL 狀態欄位不算「正式產出」。)
+> (排除:scratch 證據檔 `.reverify/.enum/.validate`、Issue 檔、`state.json` 狀態欄位不算「正式產出」。)
 
 ## 收斂鐵則 — 獨立性
 - 每次重驗【必須】由「**與產出該稿不同的另一輪 agent(新 context)**」做,獨立性才有意義(同一輪不得既產稿又自驗)。

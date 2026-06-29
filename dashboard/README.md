@@ -38,13 +38,13 @@ Dashboard 本身**不存任何狀態**，所有資訊都即時讀自檔案系統
 | 資料 | 來源檔 |
 |------|--------|
 | 專案總覽（哪些 repo/workspace） | `~/.loop/index.md`（Markdown 表格） |
-| 每個 workspace 的即時狀態 | `<repo>/.loop/<ws>/CONTROL.md` |
+| 每個 workspace 的即時狀態 | `<repo>/.loop/<ws>/state.json` |
 | 是否執行中 / PID | `<repo>/.loop/<ws>/.loop_state/run.lock` |
 | 即時 log | `<repo>/.loop/<ws>/loop.log`、`plan.log` |
 | 設定 | `<repo>/.loop/<ws>/loop.config.yaml` |
 | 規劃樹 | `<repo>/.loop/<ws>/TREE.md` |
 
-「啟動專案」其實是在該 repo 目錄下 spawn 一個 `engine/run.py` 子程序；「停止」是用 `psutil` 依 `run.lock` 的 PID 把程序樹 kill 掉。狀態欄位（phase / stuck / status）會以 CONTROL.md 的即時值覆寫 index.md 的快照。
+「啟動專案」其實是在該 repo 目錄下 spawn 一個 `engine/run.py` 子程序；「停止」是用 `psutil` 依 `run.lock` 的 PID 把程序樹 kill 掉。狀態欄位（phase / stuck / status）會以 `state.json` 的即時值覆寫 index.md 的快照。
 
 ---
 
@@ -74,7 +74,7 @@ Dashboard 本身**不存任何狀態**，所有資訊都即時讀自檔案系統
 
 | 功能 | 說明 | 對應 API |
 |------|------|----------|
-| 列出專案 | 讀 index.md + CONTROL.md 即時覆寫 | `GET /api/projects` |
+| 列出專案 | 讀 index.md + state.json 即時覆寫 | `GET /api/projects` |
 | 啟動引擎 | 在 repo 下 spawn `engine/run.py`（目前固定 auto / 全階段） | `POST /api/projects/{id}/start` |
 | 強制停止 | 依 run.lock 的 PID kill 程序樹並清 lock | `POST /api/projects/{id}/stop` |
 | 初始化新 workspace | 跑 `init-project.py` 並登錄 index.md | `POST /api/projects/init` |

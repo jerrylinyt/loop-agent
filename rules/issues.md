@@ -23,14 +23,14 @@
 
 ## 3. Issue 儲存（Context 防爆）
 - **一 Issue 一檔**:`<outputs>/issues/issue-NNN.md`(內文放這裡)。
-- **CONTROL 只留索引一行 + blocking 計數**,不貼 Issue 內文(見 context-budget.md):
+- **`state.json` 只留索引一行 + blocking 計數**,不貼 Issue 內文(見 context-budget.md):
 ```
 | Issue ID | 等級 | 標題 | Phase/TASK | 狀態 | 建立 Round |
 | 001 | BLOCKING | <一句> | 1/TASK-05 | OPEN | R012 |
 ```
-- CONTROL 的 `blocking_issues` 計數器 = 目前 OPEN 的 BLOCKING 數。任一新增 BLOCKING → 該 phase `consecutive_pass` 歸零。
+- `state.json` 的 `blocking_issues` 計數器 = 目前 OPEN 的 BLOCKING 數。任一新增 BLOCKING → 該 phase `consecutive_pass` 歸零。
 
-## 4. 修正記錄（寫進對應產出檔底部，不塞 CONTROL）
+## 4. 修正記錄（寫進對應產出檔底部，不塞 `state.json`）
 ```
 === 修正記錄 #001 ===
 時間/Round:      Phase:

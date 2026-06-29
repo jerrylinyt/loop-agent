@@ -400,15 +400,15 @@ def set_human_required(control: str, required: bool, reason: str = "", msg: str 
         set_val(control, "human_required_msg", "")
 
 
-def set_plan_human_required(plan_md: str, required: bool, reason: str = "", msg: str = ""):
+def set_plan_human_required(control: str, required: bool, reason: str = "", msg: str = ""):
     if required:
-        set_val(plan_md, "plan_human_required", "true")
-        set_val(plan_md, "plan_human_required_reason", reason)
-        set_val(plan_md, "plan_human_required_msg", msg)
+        set_val(control, "plan_human_required", "true")
+        set_val(control, "plan_human_required_reason", reason)
+        set_val(control, "plan_human_required_msg", msg)
     else:
-        set_val(plan_md, "plan_human_required", "false")
-        set_val(plan_md, "plan_human_required_reason", "")
-        set_val(plan_md, "plan_human_required_msg", "")
+        set_val(control, "plan_human_required", "false")
+        set_val(control, "plan_human_required_reason", "")
+        set_val(control, "plan_human_required_msg", "")
 
 
 # ─────────────── 一次性 Migration 工具 ───────────────

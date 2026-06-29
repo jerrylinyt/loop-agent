@@ -5,7 +5,7 @@
 # 所有方法論（怎麼收斂、何時歸零、何時停機、如何防漏）一律【不在 prompt 重寫】，
 # 改為指向 .loop/rules/ 對應規則——rules 是唯一事實來源，改 rule 不必同步改 prompt。
 #
-# 佔位符（{control} {requirements} {plan_md} {diff_range} {control_files}
+# 佔位符（{control} {requirements} {diff_range} {control_files}
 # {result_file} {node_id} {decomp_file} {max_files} {max_lines} …）由 config.fmt_prompt()
 # 以 str.replace 代入；未代入的 {xxx} 會原樣留下，故只用引擎實際會帶入的 key。
 #
@@ -71,72 +71,16 @@ git_review: |
 plan: |
   你正在執行 Loop Engineering【階段②：生成/精修規劃書】（生成輪）。
   讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、context-budget、state-model、convergence、completeness）。
-  依 .loop/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 {control} 等規劃書（loop.config.yaml + CONTROL.md + phases/*.md）。
+  依 .loop/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 {control} 等規劃書（loop.config.yaml + state.json + phases/*.md）。
   🚨 收斂一律依 .loop/rules/convergence.md 協定執行（先不看舊版、從需求獨立重推 → 留下紀錄 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零 → 有疑義從嚴算實質）。不要在此自訂收斂判準。
-  把 {plan_md} 的 plan_changed_last 設 true（本輪有實質改動）/ false（無）。
+  在需要更新規劃書狀態或填寫 plan_changed_last 欄位時，請務必先閱讀並依循 .loop/rules/state-cli-guide.md 指引，呼叫系統提供的 `{state_cli}` 進行更新（例如設定 plan_changed_last 為 true/false）！
   寫檔只允許 .loop/，禁止寫框架。結束 git add -A && git commit。
   （Plan Gate 由獨立的審查輪負責，你這輪不需自審。）
 
 plan_gate: |
   你正在執行 Loop Engineering【階段②的獨立 Plan Gate】（全新 context，只審不生）。
-  讀 {requirements} + .loop/ 的 loop.config.yaml / CONTROL.md / phases/*.md + .loop/generators/2-plan-review-gate.md。
-  逐項檢查 Gate（需求全覆蓋 / 任務粒度 / 無循環依賴 / 停止可判讀 / 收斂就位 / 逃生門 / context 防爆 / 框架唯讀 / 引擎可讀 / 輪數估算）。
+  讀 {requirements} + .loop/ 的 loop.config.yaml / state.json / phases/*.md + .loop/generators/2-plan-review-gate.md。
+  逐項檢查 Gate（需求全覆蓋 / 任務粒度 / 無循環依賴 / 停止可判讀 / 收斂就位 / 逃生門 / context防爆 / 框架唯讀 / 引擎可讀 / 輪數估算）。
   ❗只審查、不要修改任何規劃書檔（read-only verify）。
-  把結果寫進 {plan_md}：plan_gate_last= PASS（全過）或 FAIL（未過項記到 plan.log）。
-  結束 git add -A && git commit（理論上只有 {plan_md} 會變）。
-
-tree_decompose: |
-  你正在執行 Loop Engineering【規劃期：漸進拆解】。本輪只拆解一個節點。
-  目標節點：{node_id}（工單見 {decomp_file}）。
-  讀 {requirements} + 框架 rules（.loop/rules/ 的 BLUEPRINT、convergence、completeness、context-budget）。
-  獨立重推：將此節點拆成子項，寫進 {decomp_file}。
-    - proposed_children: 逗號分隔的子項 ID（簡短 slug）
-    - 每個子項加 child_<id>_type = leaf 或 pending：
-      🚨 主判準（語意，不是數行數）：leaf =「一個內聚、可被單獨驗證、快速模型一輪做得完的【自然交付單位】」。
-         用任務的自然單位切，例如：
-           · 要移植 20 隻 API → 一隻 API 一個 leaf（共 20 個）。
-           · 要建 20 個前端 component → 一個 component 一個 leaf。
-           · 共用介面/型別/schema → 抽成一個【先行 leaf】，依賴它的子項各一個 leaf 且 depends_on 它
-             （「base 元件 + 各變體」就是此通則的特例）。
-         切法鐵則：
-           · 【可獨立驗證是硬條件】：若你寫不出「能對這一片單獨判 pass/fail 的檢查」，它就不是 leaf——
-             要嘛跟讓它可驗的東西合併，要嘛配個 stub/harness。切得開但驗不動 = 切壞了。
-           · 【垂直薄片 > 水平分層】：把功能切成「一條端到端、自己能跑能驗的薄片」，
-             不要切成「全部 DB 層／全部 API 層／全部 UI 層」——分層的每片單獨不會動，整合風險全擠到最後一次爆炸。
-         一個子項若「涵蓋不只一個自然單位」「無法被單獨驗證」或「同質假設不成立（混進特例邏輯）」→ 標 pending，留下一輪再拆。
-      尺寸只是輔助煙霧偵測、不是切割準則：若某 leaf 預估遠超 ≤{max_files} 檔 / ≤{max_lines} 行，
-      回頭確認「它是不是其實包了不只一個自然單位」；但若確為【單一自然單位】（如一隻較大的 API 移植），
-      即使略超門檻仍維持 leaf——❌ 不要為了壓行數把一個內聚單位硬切兩半。
-    - 每個 type=leaf 的子項加 child_<id>_files / child_<id>_lines = <預估改動檔/行數>（整數，供上述煙霧偵測用；pending 子項免填）。
-    - 每個子項加 child_<id>_summary = 一句話描述
-    - 每個子項加 child_<id>_depends_on = 逗號分隔的「同層兄弟 ID」——本子項要先有它們的介面/產出才能做（例如各變體都 depends_on base）；無依賴留空。
-      🚨 只能依賴【同一父節點下的兄弟】，且整體依賴關係必須是 DAG（不可成環）。引擎據此排程：依賴未收斂前不會先排這個子項（base 先於變體自動成立），避免對著還沒成形的介面先做、整合時邏輯衝突。
-    - 節點層級填 integration_contract = 這些子項「兜起來」必須共同遵守的介面/契約（一段文字）：
-      例如 base component 對外的 props/型別/事件，或各 API 共用的 request/response schema、共用資料形狀。
-      讓做下游子項的後續輪有明確介面可依循、整合驗證有對照基準。若子項彼此完全獨立、無共用介面，填「無共用契約（彼此獨立）」。
-  🚨 拆解前自檢三個常見陷阱（會造成「各自正確、兜起來衝突」）：
-    1. 假獨立：N 個看似獨立的 leaf 是否其實都要改【同一個共用檔】（router 註冊、shared types、同一份 migration）？
-       是 → 把該共用檔抽成先行 leaf（大家 depends_on 它）或讓每片只動自己的檔，並寫進 integration_contract。
-       （這種衝突尺寸煙霧偵測抓不到，因為每筆改動都很小。）
-    2. 別過細：切太碎會被每片固定開銷（boot／context／review／收斂×N）吃掉，且假收斂變多。最小 ≠ 最好，
-       甜蜜點是「還能被獨立驗證、又仍是個有意義的整體」。
-    3. 別讓 base 變單點：所有人都 depends_on 的先行 leaf 要盡量最小、先磨硬再 fan-out（base 契約一錯，下游全部 reflow）。
-  🚨 收斂一律依 .loop/rules/convergence.md 的集合穩定協定（先不看舊版、獨立重列舉 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零）。不要在此自訂收斂判準。
-  把 decomp_changed_last 設 true（有改動）/ false（無）。
-  寫檔只允許 {decomp_file}。結束 git add -A && git commit。
-
-tree_decompose_gate: |
-  你正在執行 Loop Engineering【規劃期：拆解審查】（全新 context，只審不生）。
-  審查 {decomp_file} 中 {node_id} 的拆解結果。
-  讀 {requirements} + .loop/rules/convergence.md + completeness.md。
-  檢查：子項是否互不重疊、是否涵蓋父節點所有面向、
-    leaf 子項是否真的是「單一內聚、可被單獨驗證的自然交付單位」（用自然單位切：一隻 API / 一個 component / 一個變體＝一個 leaf）。
-    尺寸（≤ {max_files} 檔、≤ {max_lines} 行）只是煙霧偵測：明顯超標的 leaf 要回頭確認是不是其實包了多個單位，
-    若確為單一自然單位則放行，不因行數硬性退回。
-  依賴與契約（防止「各自正確、兜起來衝突」）：
-    - child_<id>_depends_on 只指向同層兄弟，且整體是 DAG（畫出來確認無循環依賴）。
-    - 有共用介面的子項（如各變體）有正確宣告 depends_on 指向定義介面的那個（如 base）；漏宣告 → FAIL。
-    - integration_contract 有把子項兜起來的共用介面寫清楚；依賴它的子項 summary 要對得上該契約，不得各說各話。
-  ❗只審查、不修改拆解結果。
-  把結果寫進 {decomp_file}：decomp_gate_last = PASS 或 FAIL。
+  在需要更新審查狀態（例如填寫 plan_gate_last 為 PASS/FAIL）時，請務必先閱讀並依循 .loop/rules/state-cli-guide.md 指引，呼叫系統提供的 `{state_cli}` 進行更新！
   結束 git add -A && git commit。

@@ -35,7 +35,7 @@
 - **降回預設**：若出現 `PASS` 或實質進展，模型立即降回該任務類型的**角色預設**模型，以節省成本。
 - **Lv2 人類接管**：
   - 🚨 強制約束(凍結/交人是逃生閥,不是偷懶出口):agent 動 `FROZEN`/`human_required` 前,
-    CONTROL【必須】已由**引擎**判定卡死——`stuck_level==2`(引擎設),或 `rounds_since_progress>=stall_threshold`。
+    `state.json`【必須】已由**引擎**判定卡死——`stuck_level==2`(引擎設),或 `rounds_since_progress>=stall_threshold`。
     震盪偵測「由外部 loop 引擎做(最客觀)」,agent 不得自行認定卡死。
     ❌ 嚴禁:在一個只是「難、但引擎沒判卡死」的任務上自抬 `stuck_level=2`、自行凍結任務,
     把硬工作提早甩給人類。沒有引擎卡死訊號 → 就是繼續做,不是凍結。

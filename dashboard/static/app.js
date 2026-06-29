@@ -875,7 +875,7 @@ function renderNextActions(reasonCode, reasonMsg) {
             ]
         },
         broken_control_file: {
-            instruction: '<strong>Control state is damaged.</strong> CONTROL.md is missing or invalid. Repair the workspace state file manually before resuming.',
+            instruction: '<strong>Control state is damaged.</strong> state.json is missing or invalid. Repair the workspace state file manually before resuming.',
             buttons: [
                 { text: 'Open Logs', click: () => switchTab('logs'), class: 'bg-gray-700 hover:bg-gray-600' }
             ]

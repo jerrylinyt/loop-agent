@@ -25,8 +25,8 @@ def _load_default_prompts() -> dict:
 DEFAULTS = {
     "framework_path": os.path.expanduser("~/.loop/framework"),
     "index": os.path.expanduser("~/.loop/index.md"),   # 跨專案總覽（自動維護）
-    "control": "CONTROL.md",
-    "control_files": ["CONTROL.md", "phases/*.md"],
+    "control": "state.json",
+    "control_files": ["state.json", "phases/*.md"],
     "workspace": {"mode": "in_repo"},
     # ── 生成階段（階段②：plan_loop.py 規劃書收斂）。專案 config 只需覆寫 mode 與 per-workspace log_file ──
     "generation": {
@@ -167,7 +167,7 @@ def fmt_prompt(template: str, **kw) -> str:
     """提示樣板代入（用 replace 兼容舊版的 {key} 語法，避免內文花括號干擾 str.format）。"""
     out = template or ""
     if "state_cli" not in kw:
-        control = kw.get("control", "CONTROL.md")
+        control = kw.get("control", "state.json")
         base_dir = os.path.dirname(os.path.abspath(control)) if control else os.path.abspath(".")
         state_json_path = os.path.join(base_dir, "state.json")
         state_py_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.py")
