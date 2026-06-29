@@ -19,6 +19,11 @@ app = FastAPI(title="Loop Engineering Dashboard")
 # Ensure dashboard templates folder exists
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(HERE, "templates")
+STATIC_DIR = os.path.join(HERE, "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 
 # Models
 class ProjectStatus(BaseModel):
