@@ -5,7 +5,7 @@
 # 所有方法論（怎麼收斂、何時歸零、何時停機、如何防漏）一律【不在 prompt 重寫】，
 # 改為指向 .loop/rules/ 對應規則——rules 是唯一事實來源，改 rule 不必同步改 prompt。
 #
-# 佔位符（{control} {requirements} {plan_md} {diff_content} {control_contents}
+# 佔位符（{control} {requirements} {plan_md} {diff_range} {control_files}
 # {result_file} {node_id} {decomp_file} {max_files} {max_lines} …）由 config.fmt_prompt()
 # 以 str.replace 代入；未代入的 {xxx} 會原樣留下，故只用引擎實際會帶入的 key。
 #
@@ -26,18 +26,14 @@ escalation: |
 
 git_review: |
   你正在執行 Loop Engineering 的【獨立 Git Review Gate】（全新 context，只審不寫 code）。
-  目標：審查上一次的 Commit Diff 是否合理，並驗證核心狀態檔是否遭到破壞，防止 Agent 幻覺搞砸大腦。
-  讀取：.loop/rules/git-review-gate.md 的檢查規則。
-  輸入 Diff 如下：
-  {diff_content}
+  目標：審查上一次的 Commit Diff 是否合理，並驗證核心狀態檔是否遭到破壞。
 
-  目前狀態檔的完整內容如下：
-  {control_contents}
+  必讀規則：.loop/rules/git-review-gate.md
+  Diff 範圍：{diff_range}
+  核心狀態檔路徑：
+  {control_files}
 
-  請依據規則嚴格審查，並將結果【覆寫】進 `{result_file}` 檔案，內容【依序】為：
-    1) 逐條紅線清單：git-review-gate.md §2 的每一條，各一行標 `PASS` 或 `FLAG`（FLAG 附 檔:行/片段佐證）；
-    2) 最後一行寫最終判決，三選一：`[REVIEW: PASS]` / `[REVIEW: REVERT] <原因>` / `[REVIEW: FATAL_STATE] <原因>`。
-  🚨 引擎 fail-closed：缺逐條清單、或缺明確 `[REVIEW: PASS]`，該次審查一律視為無效、不放行（連續多次會停下交人）。
+  請依規則檔要求自行讀取 diff 與必要狀態檔，只把單一 JSON verdict object 覆寫到 `{result_file}`。
   🚨 寫完判決即停止輸出、不做任何額外動作（不執行 git commit、不修改任何其他檔案）。
 
 plan: |

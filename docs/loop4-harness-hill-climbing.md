@@ -17,7 +17,7 @@
 | 既有資產 | 在 Loop 4 裡的角色 | 缺口 |
 |---|---|---|
 | `rounds.jsonl`（[engine-rounds-history.md](engine-rounds-history.md)） | **trace 來源**（每輪結構化紀錄） | ⚠️ **尚未實作**，本規劃 Phase 0 先補 |
-| `fail_history` / `progress`（[engine/state.py](../engine/state.py)） | 震盪指紋、進度簽章——痛點的原始訊號 | 只服務「單次執行內」，未被跨執行彙整 |
+| `rounds.jsonl` 的 `round_finished.fail_fingerprint` / `progress` 欄位（[engine/state.py](../engine/state.py)） | 震盪指紋、進度簽章——痛點的原始訊號 | 只服務「單次執行內」，未被跨執行彙整 |
 | `~/.loop/index.md`（跨專案總覽） | **收集器的入口**：列出機器上每個 repo+workspace | 未被任何分析消費 |
 | `maintenance/rule-loophole-audit.md` | **想像驅動**的對抗式稽核（弱模型「會怎麼鑽」） | 不看真實數據，可能硬化沒人踩到的洞、漏掉天天踩的洞 |
 | `maintenance/post-hardening-verification.md` | 硬化後的**獨立迴歸驗收** | 直接複用為 Loop 4 的合併後驗證 |
@@ -50,7 +50,7 @@
 
 ```
 下游 code repo A ─┐
-  .loop/wsX/.loop_state/{rounds.jsonl, fail_history, progress}
+  .loop/wsX/.loop_state/{rounds.jsonl}
 下游 code repo B ─┤        ┌─────────────┐     ┌──────────────────┐     ┌───────────────┐
   .loop/wsY/...    ├─(讀)─▶│ ① 收集器      │─▶ │ ② 分析 agent       │─▶ │ ③ 提案產出      │
 下游 code repo C ─┘   ▲    │ collect_      │   │ aggregate→歸因→    │   │ proposals/*.md │
@@ -96,7 +96,7 @@
 | 項目 | 設計 |
 |---|---|
 | 入口 | 解析 `~/.loop/index.md`（可 `--index` 覆蓋）取得所有 `repo + workspace`；逐一定位 `<repo>/.loop/<ws>/.loop_state/` |
-| 讀什麼 | 每個 ws 讀 `rounds.jsonl`（全部行）、`fail_history`（震盪指紋環）、`progress`、以及 `CONTROL.md` 的少數計數器快照（blocking issues / FROZEN 數 / 各 phase consecutive_pass / human_required） |
+| 讀什麼 | 每個 ws 讀 `rounds.jsonl`（typed records；從 `round_finished.fail_fingerprint` 取震盪指紋，從 round/progress 欄位取進度訊號）、以及 `CONTROL.md` 的少數計數器快照（blocking issues / FROZEN 數 / 各 phase consecutive_pass / human_required） |
 | 產出 | `maintenance/trace-snapshots/<日期>/snapshot.jsonl`（一行一輪、附 `run_id` `repo` `ws`）+ 一份 `summary.json`（見 §5 指標） |
 | 紅線 | **只讀不寫下游**；下游缺檔/壞檔/無 `.loop_state` → skip 該 ws 記 warning，不中斷；**絕不寫框架以外的任何地方** |
 | 隱私 | trace 只含結構化欄位（phase id / 計數 / 指紋 hash / 模型 tier），**不含原始程式碼或需求內文**——天然適合跨專案聚合 |
@@ -117,7 +117,7 @@
 |---|---|---|
 | **升級頻率** | `stuck_level≥1` 的輪數 / 總輪數，按 `phase`/`leaf` 分群 | 某類任務反覆卡 → 任務粒度或該 phase 規格 |
 | **watchdog 中斷率** | `killed in {timeout,idle}` 比例 | idle 多 → prompt 沒講清「一輪一任務即停」/ context 太大 |
-| **震盪指紋熱點** | `fail_history` 中重複出現的指紋，跨 run 計數 | 「改 A 壞 B」型——對應 oscillation / 寫檔守則 |
+| **震盪指紋熱點** | `round_finished.fail_fingerprint` 中重複出現的指紋，跨 run 計數 | 「改 A 壞 B」型——對應 oscillation / 寫檔守則 |
 | **不收斂段** | `progressed=false` 連續長度分布 | 收斂協定或驗證標準不清 |
 | **增強無效** | `enhanced_rounds_used` 高但其後仍 `progressed=false` | **候選：規格矛盾**（→ 標示交人，**非** harness） |
 | **Review Gate 反覆 FLAG** | （若 trace 含 gate 結果）同一條紅線反覆 FLAG | git-review-gate 規則或寫檔守則 |

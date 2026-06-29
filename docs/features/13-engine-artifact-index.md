@@ -2,6 +2,9 @@
 
 ## Type
 
+
+> Current direction: do not create a separate event/artifact JSONL file. Emit typed records into `.loop_state/rounds.jsonl` and use `type` to distinguish lifecycle events, completed rounds, and artifact-bearing records.
+
 Engine additive observability.
 
 ## Goal

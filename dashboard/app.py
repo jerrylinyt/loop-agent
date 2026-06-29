@@ -168,21 +168,6 @@ def set_control_val(control_path: str, key: str, value: str):
     except Exception as e:
         print(f"Failed to set control value: {e}")
 
-def extract_human_context(log_path: str) -> tuple[str, str]:
-    if not os.path.exists(log_path):
-        return "", ""
-    lines = get_last_n_lines(log_path, 1000)
-    idx = -1
-    for i in range(len(lines) - 1, -1, -1):
-        if "human_required" in lines[i] or "🧑‍⚖️" in lines[i]:
-            idx = i
-            break
-    if idx == -1:
-        return "", ""
-    reason_line = lines[idx].strip()
-    excerpt_lines = lines[idx : idx + 15]
-    log_excerpt = "\n".join(excerpt_lines)
-    return reason_line, log_excerpt
 
 def parse_control_file(control_path: str) -> dict:
     if not os.path.exists(control_path):
@@ -245,25 +230,6 @@ def parse_control_file(control_path: str) -> dict:
     data["phases"] = phases_list
     return data
 
-import re
-TIMESTAMP_REGEX = re.compile(r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})")
-
-def parse_timestamp(line: str) -> tuple[str, str]:
-    m = TIMESTAMP_REGEX.match(line)
-    if m:
-        ts = m.group(1)
-        text = line[len(ts):].strip()
-        return ts, text
-    return "", line.strip()
-
-ACTIVITY_CLASSIFICATION_RULES = [
-    ("complete", lambda l: "LOOP COMPLETE" in l or "TREE EXECUTE COMPLETE" in l),
-    ("review_revert", lambda l: "Git Review Gate" in l and "🚨" in l),
-    ("human_required", lambda l: "停下交人類" in l or "human_required" in l or "⛔" in l or "🧑‍⚖️" in l),
-    ("model_upgrade", lambda l: "升級模型" in l or "⬆" in l or "⬆⬆" in l),
-    ("progress", lambda l: "↩ 有進展" in l),
-    ("leaf_converged", lambda l: "🍃" in l and "收斂" in l),
-]
 
 def index_row_matches(line: str, repo_path: str, workspace: str) -> bool:
     """是否為對應 (repo_path, workspace) 的 index.md 資料列。
@@ -598,17 +564,6 @@ def get_human_context(proj_id: str):
             reason = get_control_val(plan_md, "plan_human_required_msg") or get_control_val(plan_md, "plan_human_required_reason") or ""
             reason_code = get_control_val(plan_md, "plan_human_required_reason") or ""
             
-        if not reason:
-            log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "loop.log")
-            if is_plan_human and os.path.exists(os.path.join(proj["repo"], ".loop", proj["workspace"], "plan.log")):
-                log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "plan.log")
-            reason, log_excerpt = extract_human_context(log_path)
-            # Infer fallback reason_code from content
-            if "stuck" in (reason + log_excerpt).lower():
-                reason_code = "stuck_level_2_hard_stop"
-            elif "conflict" in (reason + log_excerpt).lower():
-                reason_code = "git_review_human_conflict"
-        
     return {
         "human_required": is_any_human,
         "reason": reason,
@@ -1138,7 +1093,7 @@ def get_project_rounds(proj_id: str, limit: int = 200):
             record = json.loads(line)
         except (json.JSONDecodeError, ValueError):
             continue
-        if record.get("type", "round_finished") == "round_finished":
+        if record.get("type") == "round_finished":
             records.append(record)
     return records
 
@@ -1166,7 +1121,7 @@ def get_activity(proj_id: str, limit: int = 50):
                 except Exception:
                     continue
                 
-                rec_type = record.get("type", "round_finished")
+                rec_type = record.get("type")
                 ts = record.get("ts", "")
                 
                 if rec_type == "loop_complete":

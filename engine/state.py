@@ -72,7 +72,7 @@ def as_int(v, d=0) -> int:
 
 # ─────────────── 歷史與進度重建（從 rounds.jsonl 讀取） ───────────────
 def reconstruct_history_and_progress(cfg: dict, maxlen: int) -> tuple:
-    """從 rounds.jsonl 重建震盪歷史 (fail_history) 及進度特徵 (progress)。
+    """從 rounds.jsonl 重建震盪歷史 (fail_fingerprints) 及進度特徵 (progress)。
     讀取最近的歷史紀錄來還原上一次中斷時的記憶體狀態。"""
     from collections import deque
     dq = deque(maxlen=maxlen)
@@ -90,7 +90,7 @@ def reconstruct_history_and_progress(cfg: dict, maxlen: int) -> tuple:
                     except (json.JSONDecodeError, ValueError):
                         continue
                     # 1. 僅根據類型為 round_finished 或預設無 type 的執行輪重建進度
-                    if record.get("type", "round_finished") == "round_finished":
+                    if record.get("type") == "round_finished":
                         progress = {
                             "sig": record.get("progress_sig") or "",
                             "idle": str(record.get("idle_rounds") or 0),

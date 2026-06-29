@@ -9,6 +9,16 @@
 
 ---
 
+## Current contract
+
+`rounds.jsonl` is the single append-only structured trace stream under `.loop_state/`. Every machine-readable lifecycle record must include a `type`.
+
+- `type == "round_finished"` is the only record type included in round metrics.
+- Lifecycle records such as `run_started`, `human_required`, `loop_complete`, `review_revert`, and `stop_requested` live in the same stream.
+- Oscillation analysis reads `fail_fingerprint` from `round_finished` records; there is no legacy side-file fallback.
+- Dashboard activity is derived from typed `rounds.jsonl` records, not `loop.log` regex matching.
+
+
 ## 1. 產出物
 
 每個 workspace 一個檔：
@@ -18,7 +28,7 @@
 ```
 
 - **JSON Lines**：一行一個 JSON 物件，UTF-8，`\n` 結尾。
-- **Append-only**：每輪結束 append 一行，跨程序重啟自然累積（與 `fail_history` / `progress` 同一個 `state_dir`，見 [`engine/state.py`](../engine/state.py)）。
+- **Append-only**：每輪結束 append 一行，跨程序重啟自然累積；震盪指紋也記在 `round_finished.fail_fingerprint`。
 - 路徑用 `cfg["runtime"]["state_dir"]`（既有變數，迴圈內就有），不要自己拼路徑。
 
 ### 每行 schema
@@ -52,7 +62,7 @@
 
 ## 2. 新增 helper（放 `engine/state.py`）
 
-沿用該檔既有的 `fail_history_path` / `save_progress` 風格，新增兩個函式：
+沿用該檔既有 state helper 風格，新增兩個函式：
 
 ```python
 import json
@@ -119,7 +129,7 @@ def append_round_record(cfg: dict, record: dict) -> None:
 - **`round` 會隨重啟重來**：每次 `run.py` 起新程序，`i` 從 1 開始。因此 `round` **不是**全域唯一鍵。dashboard 畫趨勢圖時 x 軸請用「行序 / `ts`」，把 `round` 僅當參考欄位。（若日後需要全域單調序號，可另存一個持久化 counter，但本期不做，避免增加狀態。）
 - **檔案成長**：一行約 200–300 bytes，1000 輪約 0.2–0.3 MB，可接受，**本期不做 rotation**。dashboard 端只讀「最後 N 行」即可。若未來要設上限，採「append 到門檻後一次性裁切保留最後 N 行」，不要每輪 rewrite。
 - **既有 workspace 無此檔**：第一次寫入時 `append` 自動建檔；dashboard 端要容忍檔案不存在（回空陣列）。
-- **不影響 Git Review Gate**：此檔在 `.loop_state/`（執行期狀態夾），與 `fail_history`/`progress`/`run.lock` 同層。確認它**不會**被 commit（應已被 `.gitignore` 涵蓋——實作前 `git check-ignore <path>` 驗一下；若沒被忽略，要補進對應 ignore 規則，因為它不該進版控、也不該觸發 review gate 的 diff）。
+- **不影響 Git Review Gate**：此檔在 `.loop_state/`（執行期狀態夾），與 `run.lock` 同層。確認它**不會**被 commit（應已被 `.gitignore` 涵蓋——實作前 `git check-ignore <path>` 驗一下；若沒被忽略，要補進對應 ignore 規則，因為它不該進版控、也不該觸發 review gate 的 diff）。
 - **時區**：用本機時間、`%F %T` 格式，與引擎其他 log 時間戳一致（見 `loop.py` 既有 `ts`）。
 
 ---

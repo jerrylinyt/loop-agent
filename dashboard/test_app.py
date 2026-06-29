@@ -2,7 +2,7 @@ import os
 import tempfile
 import pytest
 import psutil
-from dashboard.app import get_last_n_lines, parse_index, get_control_val, set_control_val, extract_human_context, parse_control_file, index_row_matches
+from dashboard.app import get_last_n_lines, parse_index, get_control_val, set_control_val, parse_control_file, index_row_matches
 
 def test_get_last_n_lines():
     with tempfile.NamedTemporaryFile(delete=False, mode="w+", encoding="utf-8") as tmp:
@@ -108,20 +108,6 @@ def test_parse_control_threshold_normalization():
         assert by_id["2"]["threshold"] is None        # placeholder -> None (UI shows plain count)
 
 
-def test_extract_human_context():
-    with tempfile.NamedTemporaryFile(delete=False, mode="w+", encoding="utf-8") as tmp:
-        tmp.write("log line 1\n")
-        tmp.write("log line 2 with human_required set to true due to crash\n")
-        tmp.write("log line 3\n")
-        tmp.write("log line 4\n")
-        tmp.flush()
-        
-        reason, excerpt = extract_human_context(tmp.name)
-        assert "human_required" in reason
-        assert "log line 2" in excerpt
-        assert "log line 4" in excerpt
-        
-    os.unlink(tmp.name)
 
 def test_index_row_matches():
     # exact cell match (not substring) so prefix paths don't collide
@@ -206,31 +192,6 @@ def test_download_log_endpoint(monkeypatch):
         response_invalid = client.get(f"/api/projects/{proj_id}/logs/invalid_type/download")
         assert response_invalid.status_code == 400
 
-def test_d_features_activity_categorization():
-    from dashboard.app import ACTIVITY_CLASSIFICATION_RULES, parse_timestamp
-    
-    # Test timestamp parsing
-    ts, text = parse_timestamp("2026-06-27 22:00:01 ✅ LOOP COMPLETE")
-    assert ts == "2026-06-27 22:00:01"
-    assert text == "✅ LOOP COMPLETE"
-    
-    # Test line categorization rules
-    lines_and_types = [
-        ("2026-06-27 22:00:01 ✅ LOOP COMPLETE", "complete"),
-        ("2026-06-27 22:00:01 🚨 [Git Review Gate] REVERT", "review_revert"),
-        ("2026-06-27 22:00:01 ⛔ 停下交人類", "human_required"),
-        ("2026-06-27 22:00:01 升級模型", "model_upgrade"),
-        ("2026-06-27 22:00:01 ↩ 有進展", "progress"),
-        ("2026-06-27 22:00:01 🍃 收斂", "leaf_converged")
-    ]
-    
-    for line, expected_type in lines_and_types:
-        matched = None
-        for act_type, check_fn in ACTIVITY_CLASSIFICATION_RULES:
-            if check_fn(line):
-                matched = act_type
-                break
-        assert matched == expected_type, f"Failed for line: {line}"
 
 def test_d_features_d4_heartbeat(monkeypatch):
     import time
@@ -413,15 +374,10 @@ def test_collect_traces_metrics():
             f.write(f"| repo-b | {repo_b} | default | 1 | 0 | tracked | t |\n")
             
         with open(os.path.join(repo_a, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
-            f.write(json.dumps({"run_id": "a:default:1", "round": 1, "loop_type": "execute", "phase": "2", "result": "FAIL", "consecutive_pass": 0, "progressed": False, "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:00:00"}) + "\n")
+            f.write(json.dumps({"type": "round_finished", "run_id": "a:default:1", "round": 1, "loop_type": "execute", "phase": "2", "result": "FAIL", "consecutive_pass": 0, "progressed": False, "stuck_level": 0, "enhanced_rounds_used": 0, "fail_fingerprint": "fp1", "ts": "2026-06-27 22:00:00"}) + "\n")
             
         with open(os.path.join(repo_b, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
-            f.write(json.dumps({"run_id": "b:default:1", "round": 1, "loop_type": "execute", "phase": "2", "result": "FAIL", "consecutive_pass": 0, "progressed": False, "stuck_level": 1, "enhanced_rounds_used": 4, "ts": "2026-06-27 22:00:00"}) + "\n")
-            
-        with open(os.path.join(repo_a, ".loop", "default", ".loop_state", "fail_history"), "w") as f:
-            f.write("fp1\nfp2\nfp2\n")
-        with open(os.path.join(repo_b, ".loop", "default", ".loop_state", "fail_history"), "w") as f:
-            f.write("fp1\n")
+            f.write(json.dumps({"type": "round_finished", "run_id": "b:default:1", "round": 1, "loop_type": "execute", "phase": "2", "result": "FAIL", "consecutive_pass": 0, "progressed": False, "stuck_level": 1, "enhanced_rounds_used": 4, "fail_fingerprint": "fp1", "ts": "2026-06-27 22:00:00"}) + "\n")
             
         collect_py = os.path.join(os.path.dirname(os.path.dirname(__file__)), "engine", "collect_traces.py")
         out_dir = os.path.join(tmpdir, "out")
@@ -447,10 +403,6 @@ def test_collect_traces_metrics():
         fp1_cand = next(c for c in candidates if c["signal_key"] == "oscillation:fp1")
         assert fp1_cand["meets_K"] is True
         assert fp1_cand["distinct_repos"] == 2
-        
-        fp2_cand = next(c for c in candidates if c["signal_key"] == "oscillation:fp2")
-        assert fp2_cand["meets_K"] is False
-
         # Verify escalation_rate (1 of 2 rounds has stuck_level >= 1)
         assert summary["metrics"]["escalation_rate"]["overall"] == 0.5
 
@@ -527,14 +479,14 @@ def test_collect_traces_spec_conflict_suspect():
 
         # repo-a: enhanced_rounds_used=5 (>= threshold 4), last round progressed=False
         with open(os.path.join(repo_a, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
-            f.write(json.dumps({"run_id": "a:default:1", "round": 1, "loop_type": "execute",
+            f.write(json.dumps({"type": "round_finished", "run_id": "a:default:1", "round": 1, "loop_type": "execute",
                                 "phase": "2", "result": "FAIL", "consecutive_pass": 0,
                                 "progressed": False, "stuck_level": 0,
                                 "enhanced_rounds_used": 5, "ts": "2026-06-27 22:00:00"}) + "\n")
 
         # repo-b: same phase, enhanced_rounds_used=6, progressed=False
         with open(os.path.join(repo_b, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
-            f.write(json.dumps({"run_id": "b:default:1", "round": 1, "loop_type": "execute",
+            f.write(json.dumps({"type": "round_finished", "run_id": "b:default:1", "round": 1, "loop_type": "execute",
                                 "phase": "2", "result": "FAIL", "consecutive_pass": 0,
                                 "progressed": False, "stuck_level": 0,
                                 "enhanced_rounds_used": 6, "ts": "2026-06-27 22:00:00"}) + "\n")
@@ -578,12 +530,12 @@ def test_collect_traces_malformed_json_skip():
 
         # Write one valid line and one malformed line
         with open(os.path.join(repo_a, ".loop", "default", ".loop_state", "rounds.jsonl"), "w") as f:
-            f.write(json.dumps({"run_id": "a:default:1", "round": 1, "loop_type": "execute",
+            f.write(json.dumps({"type": "round_finished", "run_id": "a:default:1", "round": 1, "loop_type": "execute",
                                 "phase": "1", "result": "PASS", "consecutive_pass": 1,
                                 "progressed": True, "stuck_level": 0,
                                 "enhanced_rounds_used": 0, "ts": "2026-06-27 22:00:00"}) + "\n")
             f.write("THIS IS NOT VALID JSON\n")
-            f.write(json.dumps({"run_id": "a:default:1", "round": 2, "loop_type": "execute",
+            f.write(json.dumps({"type": "round_finished", "run_id": "a:default:1", "round": 2, "loop_type": "execute",
                                 "phase": "1", "result": "PASS", "consecutive_pass": 2,
                                 "progressed": True, "stuck_level": 0,
                                 "enhanced_rounds_used": 0, "ts": "2026-06-27 22:01:00"}) + "\n")
@@ -626,19 +578,19 @@ def test_collect_traces_pass_reset_and_streaks():
         # - non_converging_streaks: 3 consecutive non-progressed rounds
         # - pass_reset_rate: consecutive_pass goes 0→1→2→0 (one reset event)
         rounds_data = [
-            {"run_id": "a:default:1", "round": 1, "loop_type": "execute", "phase": "1",
+            {"type": "round_finished", "run_id": "a:default:1", "round": 1, "loop_type": "execute", "phase": "1",
              "result": "PASS", "consecutive_pass": 1, "progressed": True,
              "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:00:00"},
-            {"run_id": "a:default:1", "round": 2, "loop_type": "execute", "phase": "1",
+            {"type": "round_finished", "run_id": "a:default:1", "round": 2, "loop_type": "execute", "phase": "1",
              "result": "PASS", "consecutive_pass": 2, "progressed": True,
              "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:01:00"},
-            {"run_id": "a:default:1", "round": 3, "loop_type": "execute", "phase": "1",
+            {"type": "round_finished", "run_id": "a:default:1", "round": 3, "loop_type": "execute", "phase": "1",
              "result": "FAIL", "consecutive_pass": 0, "progressed": False,
              "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:02:00"},
-            {"run_id": "a:default:1", "round": 4, "loop_type": "execute", "phase": "1",
+            {"type": "round_finished", "run_id": "a:default:1", "round": 4, "loop_type": "execute", "phase": "1",
              "result": "FAIL", "consecutive_pass": 0, "progressed": False,
              "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:03:00"},
-            {"run_id": "a:default:1", "round": 5, "loop_type": "execute", "phase": "1",
+            {"type": "round_finished", "run_id": "a:default:1", "round": 5, "loop_type": "execute", "phase": "1",
              "result": "FAIL", "consecutive_pass": 0, "progressed": False,
              "stuck_level": 0, "enhanced_rounds_used": 0, "ts": "2026-06-27 22:04:00"},
         ]
@@ -712,6 +664,28 @@ def test_stop_request_and_human_details():
         assert get_val(control_path, "human_required") == "false"
         assert get_val(control_path, "human_required_reason") == ""
         assert get_val(control_path, "human_required_msg") == ""
+
+
+def test_git_review_gate_requires_json_verdict():
+    import sys
+    import json
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "engine"))
+    from loop import _load_review_verdict, _review_checklist_valid
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result_path = os.path.join(tmpdir, "git_review_result")
+
+        with open(result_path, "w", encoding="utf-8") as f:
+            f.write("[REVIEW: PASS]\n")
+        assert _load_review_verdict(result_path) is None
+
+        checklist = [{"item": f"check {i}", "status": "PASS"} for i in range(6)]
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump({"verdict": "PASS", "reason": "ok", "checklist": checklist}, f)
+
+        verdict = _load_review_verdict(result_path)
+        assert verdict["verdict"] == "PASS"
+        assert _review_checklist_valid(verdict) is True
 
 
 def test_dashboard_human_context_endpoint(monkeypatch):

@@ -18,7 +18,7 @@
   - `rules/git-review-gate.md` §2 新增第 11 條「驗收證據缺失」：本輪若標 `last_round_result: PASS` 或讓 `p{i}_consecutive_pass` +1，且任務可驗證（有 build/test/編譯器），diff/commit/證據檔內找不到實際指令輸出 → REVERT。純分析/文件/未宣稱 PASS 的輪次不適用。
   - §2 標題由「六大審查紅線」改為「審查紅線」（原本就已列 10 條、標題數字過時）。
   - §3 逐條清單列舉加上「驗收證據缺失」。
-- **不需改 code**：`prompts.yaml` 的 `git_review` 已指向「§2 的每一條」，自動含新紅線；`loop.py` 的 `_review_has_checklist`（門檻 ≥6 條）在 11 條下仍成立。
+- **不需改 code**：`prompts.yaml` 的 `git_review` 已指向「§2 的每一條」，自動含新紅線；`loop.py` 的 JSON verdict checklist 驗證（門檻 ≥6 條）在 11 條下仍成立。
 - **自驗**：跑一輪讓 agent 標 PASS 但 commit 無驗證輸出 → 審查輪應 FLAG/REVERT；標 PASS 且附實際 build/test 輸出 → PASS。
 
 ### WI-H2 — boot-sequence 把「留證」擴到 per-task 執行輪 ✅ 已完成

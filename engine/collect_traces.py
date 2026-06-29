@@ -52,23 +52,9 @@ def parse_index_file(index_path: str) -> list[dict]:
         logger.error(f"Error parsing index file {index_path}: {e}")
     return workspaces
 
-def load_fail_history(state_dir: str) -> list[str]:
-    fail_path = os.path.join(state_dir, "fail_history")
-    fingerprints = []
-    if os.path.exists(fail_path):
-        try:
-            with open(fail_path, "r", encoding="utf-8", errors="replace") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        fingerprints.append(line)
-        except Exception as e:
-            logger.warning(f"Failed to read fail_history in {state_dir}: {e}")
-    return fingerprints
-
 def is_round_record(record: dict) -> bool:
-    """Return True for completed round records, including legacy untyped rows."""
-    return record.get("type", "round_finished") == "round_finished"
+    """Return True for completed round records."""
+    return record.get("type") == "round_finished"
 
 def main():
     ap = argparse.ArgumentParser(description="Loop 4 Trace Collector & Aggregator")
@@ -79,8 +65,7 @@ def main():
     ap.add_argument("--k", type=int, default=2,
                     help="Min distinct repo count threshold for cross-project promotion")
     ap.add_argument("--since", default=None,
-                    help="Filter rounds.jsonl traces starting from YYYY-MM-DD "
-                         "(note: does NOT affect oscillation_hotspots which reads cumulative fail_history)")
+                    help="Filter rounds.jsonl traces starting from YYYY-MM-DD")
     ap.add_argument("--enhanced-threshold", type=int, default=4,
                     help="Min enhanced rounds used to mark enhanced ineffective")
     args = ap.parse_args()
@@ -113,7 +98,6 @@ def main():
             logger.warning(f"Rounds log not found: {rounds_path}, skipping.")
             continue
 
-        # Load fail_history for this workspace (first collect from rounds.jsonl, fallback to file if empty)
         fingerprints = []
         workspace_fail_histories[ws_key] = fingerprints
 
@@ -137,7 +121,7 @@ def main():
                             if ts_val and ts_val < args.since:
                                 continue
 
-                        # Track latest run_id for fail_history mapping
+                        # Track latest run_id for event-to-round context.
                         run_id = record.get("run_id")
                         if run_id:
                             workspace_latest_run[ws_key] = run_id
@@ -154,9 +138,6 @@ def main():
                     except json.JSONDecodeError as je:
                         logger.warning(f"Malformed JSON on line {line_idx} in {rounds_path}: {je}")
             
-            # Fallback to loading fail_history from file if no fingerprints were extracted from rounds.jsonl
-            if not fingerprints:
-                workspace_fail_histories[ws_key] = load_fail_history(state_dir)
         except Exception as e:
             logger.error(f"Error reading rounds in {rounds_path}: {e}")
 
