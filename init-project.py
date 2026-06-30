@@ -80,6 +80,21 @@ def main(argv):
     else:
         print(f"  = 已存在，略過 {cfg_dst}")
 
+    # 2.5) state.json（不覆蓋既有）
+    state_dst = os.path.join(ws_dir, "state.json")
+    if not os.path.exists(state_dst):
+        import json
+        initial_state = {
+            "current_phase": "1",
+            "control": {},
+            "phases": []
+        }
+        with open(state_dst, "w", encoding="utf-8") as f:
+            json.dump(initial_state, f, indent=2, ensure_ascii=False)
+        print(f"  + {state_dst}")
+    else:
+        print(f"  = 已存在，略過 {state_dst}")
+
     # 3) .gitignore（補 loop 產物；用 glob 涵蓋所有 workspace，不必每個 --name 都補一次）
     gi = os.path.join(repo, ".gitignore")
     needed = [".loop/*/loop.log", ".loop/*/loop.log.*",
