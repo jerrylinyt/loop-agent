@@ -10,6 +10,7 @@ run.py — 單一入口,串接「階段②生成」與「階段③執行」兩�
   all（預設）: 依 mode 跑(gated 只到生成收斂;auto 一路到執行收斂)。
   plan       : 只跑階段②(plan_loop.py)。
   execute    : 只跑階段③(loop.py)。← gated 模式下人類 review 完用這個。
+  reset-execute-state : 保留規劃書,重置執行狀態,可指定從 phase/task 開始。
 """
 
 import glob
@@ -18,6 +19,7 @@ import os
 import sys
 import argparse
 import subprocess
+from datetime import datetime
 
 # 把當前目錄加進 sys.path 以便 import .utils 和 .config
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -77,6 +79,119 @@ def run_reset_plan(cfg) -> int:
     return run_plan("gated")
 
 
+def _phase_index(phases: list[dict], phase_id: str) -> int:
+    for idx, phase in enumerate(phases):
+        if str(phase.get("id")) == str(phase_id):
+            return idx
+    raise ValueError(f"phase '{phase_id}' not found in state.json")
+
+
+def _task_sort_key(task: dict) -> tuple[int, str]:
+    try:
+        order = int(task.get("order"))
+    except (TypeError, ValueError):
+        order = 10**9
+    return order, str(task.get("id") or "")
+
+
+def _task_index(tasks: list[dict], task_id: str) -> int:
+    ordered = sorted(enumerate(tasks), key=lambda item: _task_sort_key(item[1]))
+    for ordered_idx, (_, task) in enumerate(ordered):
+        if str(task.get("id")) == str(task_id):
+            return ordered_idx
+    raise ValueError(f"task '{task_id}' not found in selected phase")
+
+
+def _reset_task(task: dict) -> None:
+    task["status"] = "TODO"
+    task["conv"] = 0
+    task["last_round"] = None
+    task["last_conv_sig"] = ""
+
+
+def reset_execute_state_data(data: dict, *, phase: str | None = None, task: str | None = None) -> dict:
+    """Reset execution progress while preserving generated plan files."""
+    phases = data.get("phases") or []
+    if not isinstance(phases, list) or not phases:
+        raise ValueError("state.json has no phases to reset")
+
+    target_phase = str(phase or phases[0].get("id") or "1")
+    start_phase_idx = _phase_index(phases, target_phase)
+
+    task_start_by_phase: dict[str, int] = {}
+    if task:
+        tasks = phases[start_phase_idx].get("tasks") or []
+        if not isinstance(tasks, list):
+            raise ValueError(f"phase '{target_phase}' has no task list")
+        task_start_by_phase[target_phase] = _task_index(tasks, task)
+
+    data["current_phase"] = target_phase
+    control = data.setdefault("control", {})
+    control.update({
+        "last_round_mode": "",
+        "last_round_result": "NA",
+        "last_round_fail_tasks": "",
+        "rounds_since_progress": 0,
+        "stuck_level": 0,
+        "current_model_tier": "",
+        "enhanced_rounds_used": 0,
+        "human_required": False,
+        "human_required_code": "",
+        "human_required_reason": "",
+        "human_required_msg": "",
+        "human_required_since": "",
+        "suggested_human_action": "",
+        "human_required_source": "",
+        "human_required_run_id": "",
+        "review_invalid_streak": 0,
+        "last_task_progress_run_id": "",
+        "stop_condition_met": False,
+    })
+
+    for idx, phase_obj in enumerate(phases):
+        if idx < start_phase_idx:
+            continue
+        phase_id = str(phase_obj.get("id") or "")
+        phase_obj["consecutive_pass"] = 0
+        phase_obj["total_validations"] = 0
+        phase_obj["last_result"] = ""
+
+        tasks = phase_obj.get("tasks") or []
+        if not isinstance(tasks, list):
+            continue
+        ordered = sorted(enumerate(tasks), key=lambda item: _task_sort_key(item[1]))
+        start_task_idx = task_start_by_phase.get(phase_id, 0)
+        for ordered_idx, (_, task_obj) in enumerate(ordered):
+            if ordered_idx >= start_task_idx:
+                _reset_task(task_obj)
+
+    data.setdefault("reset_history", []).append({
+        "ts": datetime.now().strftime("%F %T"),
+        "type": "execute",
+        "phase": target_phase,
+        "task": task or "",
+    })
+    return data
+
+
+def run_reset_execute(cfg, phase: str | None = None, task: str | None = None) -> int:
+    control = cfg.get("control", "state.json")
+    state_path = os.path.abspath(control)
+    try:
+        data = load_state_json(state_path)
+        reset_execute_state_data(data, phase=phase, task=task)
+        save_state_json(state_path, data)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr, flush=True)
+        return 1
+
+    scope = f"phase {data.get('current_phase') or '1'}"
+    if task:
+        scope += f", task {task}"
+    print(f"✅ execute-state reset complete from {scope}: {state_path}", flush=True)
+    return 0
+
+
 # run_reject function removed
 
 
@@ -84,7 +199,11 @@ def main():
     ap = argparse.ArgumentParser(description="Loop Engineering 入口（生成 + 執行）")
     ap.add_argument("--mode", choices=["gated", "auto"], default=None,
                     help="預設取自 config.generation.mode")
-    ap.add_argument("--stage", choices=["all", "plan", "execute", "reset-plan"], default="all")
+    ap.add_argument("--stage", choices=["all", "plan", "execute", "reset-plan", "reset-execute-state", "reset-execute"], default="all")
+    ap.add_argument("--reset-to-phase", default=None,
+                    help="reset-execute-state 起點 phase；省略時從第一個 phase 開始全部重置")
+    ap.add_argument("--reset-to-task", default=None,
+                    help="reset-execute-state 起點 task；需搭配 --reset-to-phase，會重置該 task 以及後續 task")
     ap.add_argument("--preflight", action="store_true", help="只輸出結構化 preflight，不啟動 loop")
     ap.add_argument("--json", action="store_true", help="搭配 --preflight 輸出 JSON")
     add_common_args(ap)
@@ -117,6 +236,11 @@ def main():
         return run_exec()
     if args.stage == "reset-plan":
         return run_reset_plan(cfg)
+    if args.stage in ("reset-execute-state", "reset-execute"):
+        if args.reset_to_task and not args.reset_to_phase:
+            print("Error: --reset-to-task requires --reset-to-phase", file=sys.stderr)
+            return 1
+        return run_reset_execute(cfg, phase=args.reset_to_phase, task=args.reset_to_task)
 
     # stage=all
     if args.mode == "auto":

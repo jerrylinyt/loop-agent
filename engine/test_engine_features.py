@@ -17,6 +17,7 @@ from state import (
     rounds_log_path,
     set_human_required,
 )
+from run import reset_execute_state_data
 from utils import structured_preflight
 
 
@@ -140,6 +141,90 @@ def test_task_conv_rejects_duplicate_signature_and_reset_clears_it():
         assert "cannot increment twice" in second.stderr
         assert reset.returncode == 0
         assert third.returncode == 0
+
+
+def test_reset_execute_state_defaults_to_all_phases():
+    data = {
+        "current_phase": "2",
+        "phases": [
+            {
+                "id": "1",
+                "consecutive_pass": 3,
+                "total_validations": 4,
+                "last_result": "PASS",
+                "tasks": [{"id": "TASK-01", "status": "CONVERGED", "conv": 2, "threshold": 1, "last_round": 5, "last_conv_sig": "abc"}],
+            },
+            {
+                "id": "2",
+                "consecutive_pass": 1,
+                "total_validations": 2,
+                "last_result": "FAIL",
+                "tasks": [{"id": "TASK-02", "status": "DRAFTED", "conv": 1, "threshold": 1, "last_round": 6, "last_conv_sig": "def"}],
+            },
+        ],
+        "control": {"human_required": True, "stuck_level": 2, "stop_condition_met": True},
+    }
+
+    reset_execute_state_data(data)
+
+    assert data["current_phase"] == "1"
+    assert data["control"]["human_required"] is False
+    assert data["control"]["stuck_level"] == 0
+    assert data["control"]["stop_condition_met"] is False
+    for phase in data["phases"]:
+        assert phase["consecutive_pass"] == 0
+        assert phase["total_validations"] == 0
+        for task in phase["tasks"]:
+            assert task["status"] == "TODO"
+            assert task["conv"] == 0
+            assert task["last_round"] is None
+            assert task["last_conv_sig"] == ""
+
+
+def test_reset_execute_state_can_start_at_phase():
+    data = {
+        "current_phase": "3",
+        "phases": [
+            {"id": "1", "consecutive_pass": 5, "tasks": [{"id": "TASK-01", "status": "CONVERGED", "conv": 5}]},
+            {"id": "2", "consecutive_pass": 2, "tasks": [{"id": "TASK-02", "status": "CONVERGED", "conv": 3}]},
+            {"id": "3", "consecutive_pass": 1, "tasks": [{"id": "TASK-03", "status": "DRAFTED", "conv": 1}]},
+        ],
+        "control": {},
+    }
+
+    reset_execute_state_data(data, phase="2")
+
+    assert data["current_phase"] == "2"
+    assert data["phases"][0]["consecutive_pass"] == 5
+    assert data["phases"][0]["tasks"][0]["status"] == "CONVERGED"
+    assert data["phases"][1]["consecutive_pass"] == 0
+    assert data["phases"][1]["tasks"][0]["status"] == "TODO"
+    assert data["phases"][2]["tasks"][0]["status"] == "TODO"
+
+
+def test_reset_execute_state_can_start_at_task():
+    data = {
+        "current_phase": "1",
+        "phases": [{
+            "id": "1",
+            "consecutive_pass": 4,
+            "tasks": [
+                {"id": "TASK-01", "order": 1, "status": "CONVERGED", "conv": 5},
+                {"id": "TASK-02", "order": 2, "status": "CONVERGED", "conv": 5},
+                {"id": "TASK-03", "order": 3, "status": "DRAFTED", "conv": 1},
+            ],
+        }],
+        "control": {},
+    }
+
+    reset_execute_state_data(data, phase="1", task="TASK-02")
+
+    assert data["current_phase"] == "1"
+    assert data["phases"][0]["consecutive_pass"] == 0
+    assert data["phases"][0]["tasks"][0]["status"] == "CONVERGED"
+    assert data["phases"][0]["tasks"][0]["conv"] == 5
+    assert data["phases"][0]["tasks"][1]["status"] == "TODO"
+    assert data["phases"][0]["tasks"][2]["status"] == "TODO"
 
 
 def test_guarded_write_appends_state_event():
