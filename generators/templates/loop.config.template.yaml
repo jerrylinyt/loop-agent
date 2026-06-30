@@ -8,7 +8,7 @@
 # {{LOOP_DIR}} 由 init-project.py 替換成 .loop/<workspace 名稱>（多份需求並存：見 README 多 workspace）。
 
 framework_path: ~/.loop/framework            # 外部共享、唯讀的框架 clone（init 時填入實際路徑；每台機器不同）
-
+repo: .
 control: {{LOOP_DIR}}/state.json
 control_files: [{{LOOP_DIR}}/state.json, "{{LOOP_DIR}}/phases/*.md"]   # git 守護「整檔被清空」監控目標（支援 glob）
 

@@ -405,6 +405,25 @@ export default function App() {
     }
   }
 
+  const handleResetPlan = async (id: string) => {
+    if (!confirm("Are you sure you want to reset all planning progress? This will clear current plan, phases, and delete files under phases/, then spawn the planning loop again.")) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/workspaces/${id}/reset-plan`, { method: 'POST' })
+      if (res.ok) {
+        flashSuccess("Workspace plan reset and planning loop spawned successfully!")
+        fetchWorkspaces()
+      } else {
+        const error = await res.json()
+        flashError(error.detail || "Failed to reset workspace plan")
+      }
+    } catch (e) {
+      flashError("Network connection error")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleUntrack = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!confirm("Remove this workspace from the Dashboard track index? This does not delete any files on your disk.")) return
@@ -831,6 +850,18 @@ export default function App() {
                     title="Clear lock file manually"
                   >
                     <RotateCcw className="h-4 w-4" />
+                  </button>
+                )}
+
+                {activeWorkspace?.status !== 'running' && (
+                  <button 
+                    onClick={() => handleResetPlan(activeWorkspace!.id)}
+                    disabled={loading}
+                    className="flex items-center space-x-1.5 px-3 py-2 bg-slate-850 hover:bg-slate-800 disabled:opacity-50 text-slate-300 hover:text-white rounded-lg text-sm font-semibold border border-slate-700 transition-colors"
+                    title="Reset planning progress and restart planning"
+                  >
+                    <RotateCcw className="h-4 w-4 text-slate-400" />
+                    <span>Reset Plan</span>
                   </button>
                 )}
               </div>

@@ -663,11 +663,11 @@ def test_stop_request_and_human_details():
         # set_human_required sets reason and msg
         set_human_required(control_path, True, "some_reason", "Some Message Detail")
         assert get_val(control_path, "human_required") == "true"
-        assert get_val(control_path, "human_required_reason") == "some_reason"
+        assert get_val(control_path, "human_required_code") == "some_reason"
         assert get_val(control_path, "human_required_msg") == "Some Message Detail"
         
         # set_human_required False clears reasons
-        set_human_required(control_path, False)
+        set_human_required(control_path, False, source="resume")
         assert get_val(control_path, "human_required") == "false"
         assert get_val(control_path, "human_required_reason") == ""
         assert get_val(control_path, "human_required_msg") == ""
@@ -751,3 +751,41 @@ def test_dashboard_human_context_endpoint(monkeypatch):
         assert content["control"]["human_required"] is False
         assert content["control"]["human_required_reason"] == ""
         assert content["control"]["human_required_msg"] == ""
+
+
+def test_dashboard_reset_plan_endpoints(monkeypatch):
+    from fastapi.testclient import TestClient
+    from dashboard.app import app
+    import subprocess
+    import tempfile
+    
+    # Mock subprocess.Popen to prevent background execution holding file locks
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: None)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_path = os.path.join(tmpdir, "my-repo")
+        os.makedirs(os.path.join(repo_path, ".loop", "default", ".loop_state"), exist_ok=True)
+        
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("# Loop 專案總覽（自動維護）\n\n")
+            f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
+            f.write("|------|------|-----------|-------|-------|------|------|\n")
+            f.write(f"| my-repo | {repo_path} | default | 1 | 0 | tracked | t |\n")
+            
+        monkeypatch.setattr("dashboard.app.get_index_path", lambda: index_path)
+        
+        projects = parse_index()
+        proj_id = projects[0]["id"]
+        
+        client = TestClient(app)
+        
+        # Test reset-plan on old endpoint
+        r1 = client.post(f"/api/projects/{proj_id}/reset-plan")
+        assert r1.status_code == 200
+        assert r1.json() == {"status": "reset_and_planning"}
+        
+        # Test reset-plan on new endpoint
+        r2 = client.post(f"/api/workspaces/{proj_id}/reset-plan")
+        assert r2.status_code == 200
+        assert r2.json() == {"status": "reset_and_planning"}

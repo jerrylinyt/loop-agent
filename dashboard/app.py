@@ -652,6 +652,10 @@ def get_workspace_tree(id: str):
 def reject_workspace_node(id: str, req: RejectRequest):
     return reject_project(id, req)
 
+@app.post("/api/workspaces/{id}/reset-plan")
+def reset_workspace_plan(id: str):
+    return reset_project_plan(id)
+
 @app.get("/api/workspaces/{id}/timeline")
 def get_workspace_timeline(id: str, limit: int = 100):
     proj = get_project_by_id(id)
@@ -1470,6 +1474,33 @@ def reject_project(proj_id: str, req: RejectRequest):
                 stderr=f_out
             )
         return {"status": "rejected_and_planning"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/projects/{proj_id}/reset-plan")
+def reset_project_plan(proj_id: str):
+    proj = get_project_by_id(proj_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    if proj["is_running"]:
+        raise HTTPException(status_code=400, detail="Cannot reset plan while project is running. Stop it first.")
+        
+    framework_dir = os.path.dirname(HERE)
+    run_py = os.path.join(framework_dir, "engine", "run.py")
+    
+    try:
+        state_dir = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state")
+        os.makedirs(state_dir, exist_ok=True)
+        spawn_log_path = os.path.join(state_dir, "spawn.log")
+        with open(spawn_log_path, "a", encoding="utf-8") as f_out:
+            subprocess.Popen(
+                [sys.executable, run_py, "--workspace", proj["workspace"], "--stage", "reset-plan"],
+                cwd=proj["repo"],
+                stdout=f_out,
+                stderr=f_out
+            )
+        return {"status": "reset_and_planning"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
