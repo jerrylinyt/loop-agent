@@ -58,12 +58,12 @@
 ## 3. 任務狀態與收斂管理 (`task-status` / `task-conv`)
 
 ### 3.1 變更任務狀態
-任務狀態包括：`TODO`、`DRAFTED`、`IN_PROGRESS`、`CONVERGED`、`NEEDS_REVISION`、`FROZEN`。
-- **開始實作某一任務** (改為 `IN_PROGRESS`)：
+任務狀態包括：`TODO`、`DRAFTED`、`CONVERGED`、`NEEDS_REVISION`、`FROZEN`。
+- **開始實作某一任務** (改為 `DRAFTED`)：
   ```bash
-  {state_cli} task-status --phase <phase_id> --task <task_id> --to IN_PROGRESS
+  {state_cli} task-status --phase <phase_id> --task <task_id> --to DRAFTED
   # 範例
-  {state_cli} task-status --phase 1 --task TASK-01 --to IN_PROGRESS
+  {state_cli} task-status --phase 1 --task TASK-01 --to DRAFTED
   ```
 - **任務收斂完成** (改為 `CONVERGED`，前提是 conv 連續達標)：
   ```bash
@@ -140,3 +140,30 @@ Issue 的狀態包括 `OPEN`、`RESOLVED`、`WONTFIX`：
 1. 狀態會被原子寫入 `state.json` 檔案。
 2. 你可以藉由 `git diff` 查看 `state.json` 的變更，確認狀態已經成功寫入。
 3. ❌ **不要**使用編輯器手動修改 `state.json`。
+
+---
+
+## 🚨 狀態變更與 CLI 剛性約束（非法操作防護）
+
+為了避免狀態損毀或出現非法流程進展，`state.py` 內建了嚴格的校驗機制。任何不合規的操作均會回傳 exit code 1 並拒絕寫入：
+
+1. **欄位寫入白名單**：
+   - 只能修改白名單內的鍵值（如 `current_phase`、`last_round_mode` 等），禁止寫入自訂的隨意鍵值。
+2. **累加限制 (`incr`)**：
+   - `incr` 僅限用於數值型鍵值（如 `consecutive_pass`、`total_validations`、`rounds_since_progress`、`stuck_level`、`depth`、`stable_rounds`、`reflow_count` 等）。非數值型欄位無法累加。
+3. **流程與守衛保護 (Guarded Transition)**：
+   - `human_required` 與 `plan_human_required` 一旦為 `true`，**嚴禁**直接透過 `set` 寫回 `false`。必須透過系統的恢復管道（如 `resume`、`dashboard_resume`）解除。
+   - `current_phase` 只能往前推進，**嚴禁**改小（逆向移動）。
+4. **任務狀態單步轉移軌跡**：
+   - 只允許合法的狀態轉移：
+     - `TODO` ➔ `DRAFTED` / `FROZEN`
+     - `DRAFTED` ➔ `CONVERGED` / `NEEDS_REVISION` / `FROZEN`
+     - `NEEDS_REVISION` ➔ `DRAFTED` / `FROZEN`
+     - `FROZEN` ➔ `TODO` / `DRAFTED` / `NEEDS_REVISION`
+     - `CONVERGED` ➔ `NEEDS_REVISION` / `FROZEN`
+   - ❌ **嚴禁越級或不合規的轉移**（例如：直接從 `TODO` 或 `NEEDS_REVISION` 跳轉至 `CONVERGED` 為非法操作）。
+5. **收斂門檻驗證 (Convergence Gate)**：
+   - 當你要將任務狀態設為 `CONVERGED` 時，該任務的累計收斂計數 `conv` **必須**已經達到或超過門檻（`threshold`，預設為 5），否則會被拒絕。
+6. **唯一性檢查**：
+   - 使用 `task-add` 時，Task ID 在該 Phase 內不可重複。
+   - 使用 `issue-add` 時，Issue ID 全域不可重複。

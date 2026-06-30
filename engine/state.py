@@ -904,38 +904,32 @@ if __name__ == "__main__":
     import sys
     
     parser = argparse.ArgumentParser(description="Loop Engineering State CLI Tool")
+    parser.add_argument("--control", help="Path to control file")
+    parser.add_argument("--state", help="Path to state file")
     subparsers = parser.add_subparsers(dest="cmd", required=True)
     
     # get
     get_p = subparsers.add_parser("get")
-    get_p.add_argument("--control")
-    get_p.add_argument("--state")
     get_p.add_argument("key")
     
     # set
     set_p = subparsers.add_parser("set")
-    set_p.add_argument("--control")
-    set_p.add_argument("--state")
     set_p.add_argument("key")
     set_p.add_argument("value")
     
     # incr
     incr_p = subparsers.add_parser("incr")
-    incr_p.add_argument("--control")
-    incr_p.add_argument("--state")
     incr_p.add_argument("key")
     incr_p.add_argument("--by", type=int, default=1)
     
     # task-status
     ts_p = subparsers.add_parser("task-status")
-    ts_p.add_argument("--state", required=True)
     ts_p.add_argument("--phase", required=True)
     ts_p.add_argument("--task", required=True)
     ts_p.add_argument("--to", required=True, choices=["TODO", "DRAFTED", "CONVERGED", "NEEDS_REVISION", "FROZEN"])
     
     # task-conv
     tc_p = subparsers.add_parser("task-conv")
-    tc_p.add_argument("--state", required=True)
     tc_p.add_argument("--phase", required=True)
     tc_p.add_argument("--task", required=True)
     tc_group = tc_p.add_mutually_exclusive_group(required=True)
@@ -944,7 +938,6 @@ if __name__ == "__main__":
     
     # task-add
     ta_p = subparsers.add_parser("task-add")
-    ta_p.add_argument("--state", required=True)
     ta_p.add_argument("--phase", required=True)
     ta_p.add_argument("--id", required=True)
     ta_p.add_argument("--order", type=int, required=True)
@@ -955,7 +948,6 @@ if __name__ == "__main__":
     
     # issue-add
     ia_p = subparsers.add_parser("issue-add")
-    ia_p.add_argument("--state", required=True)
     ia_p.add_argument("--id", required=True)
     ia_p.add_argument("--level", required=True, choices=["BLOCKING", "NON_BLOCKING"])
     ia_p.add_argument("--task", default="")
@@ -964,40 +956,33 @@ if __name__ == "__main__":
     
     # issue-set-status
     is_p = subparsers.add_parser("issue-set-status")
-    is_p.add_argument("--state", required=True)
     is_p.add_argument("--id", required=True)
     is_p.add_argument("--to", required=True, choices=["OPEN", "RESOLVED"])
     
     # node-set-state
     ns_p = subparsers.add_parser("node-set-state")
-    ns_p.add_argument("--state", required=True)
     ns_p.add_argument("--node", required=True)
     ns_p.add_argument("--to", required=True, choices=["PENDING", "DECOMPOSED", "LEAF", "IN_PROGRESS", "CONVERGED", "NEEDS_REVISION", "FROZEN"])
     
     # node-children
     nc_p = subparsers.add_parser("node-children")
-    nc_p.add_argument("--state", required=True)
     nc_p.add_argument("--node", required=True)
     nc_p.add_argument("--set", required=True)
     
     # node-reflow
     nr_p = subparsers.add_parser("node-reflow")
-    nr_p.add_argument("--state", required=True)
     nr_p.add_argument("--node", required=True)
     
     # render-control
     rc_p = subparsers.add_parser("render-control")
-    rc_p.add_argument("--state", required=True)
     rc_p.add_argument("--out", required=True)
     
     # derive
     dv_p = subparsers.add_parser("derive")
-    dv_p.add_argument("--state", required=True)
     dv_p.add_argument("expr")
     
     # migrate
     mg_p = subparsers.add_parser("migrate")
-    mg_p.add_argument("--control", required=True)
     mg_p.add_argument("--out", required=True)
     
     args = parser.parse_args()
@@ -1011,6 +996,9 @@ if __name__ == "__main__":
     
     # 處理 migrate 子命令 (特別，因為它不需要 state 參數)
     if args.cmd == "migrate":
+        if not getattr(args, "control", None):
+            print("Error: --control is required for migrate command.", file=sys.stderr)
+            sys.exit(1)
         migrate_to_json(args.control, args.out)
         sys.exit(0)
         

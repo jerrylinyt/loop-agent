@@ -16,9 +16,7 @@ base: |
   請讀取狀態檔 {control}，依 .loop/rules/boot-sequence.md 的 BOOT SEQUENCE 開始工作（結束時做 STEP C 的提交）。
   🚨 嚴格遵守 boot-sequence 兩條鐵則：本輪只挑【單一一個】任務；STEP 10 完成 commit 後【立即停止輸出並結束 process】，絕不自行開下一輪。
   本輪必讀：{control} 與 .loop/rules/boot-sequence.md；其餘 rules 按需讀。
-  🚨 狀態更新鐵則：狀態資料存於 {control}，你一律禁止直接碰觸或修改 {control} 檔案本身！
-  在需要更新狀態或填寫 last_round_mode, last_round_result 等欄位時，請務必先閱讀並依循 .loop/rules/state-cli-guide.md 指引，呼叫系統提供的 `{state_cli}` 進行更新！
-  ❌ 任何直接修改 {control} 檔案的行為，皆會被 Review Gate 判定為無效並 REVERT。
+  🚨 狀態更新鐵則：你一律禁止手動或直接修改 {control} 檔案本身！任何狀態變更均必須依循 .loop/rules/state-cli-guide.md 指引，呼叫系統提供的 `{state_cli}` 進行更新，否則會被 Review Gate 直接 REVERT。
 
 
 
@@ -33,14 +31,12 @@ git_review: |
   目標：審查上一次的 Commit Diff 是否合理，並驗證狀態變更是否合規。
 
   必讀規則：.loop/rules/git-review-gate.md
-  Diff 範圍：{diff_range}
-  當前 Commit Diff 內容：
-  {diff_content}
+  
+  請依規則檔要求自行審查代碼與狀態變更。你需要：
+  1. 使用工具獲取此範圍的 Git Diff 變更內容（使用指令：`{diff_range}`）
+  2. 讀取當前的狀態檔案（路徑：`{control}`）
 
-  當前最新狀態資料 (state.json)：
-  {state_json_content}
-
-  請依規則檔要求自行審查代碼與 state.json 變更，只把單一 JSON verdict object 覆寫到 `{result_file}`。格式為：
+  審查完畢後，只把單一 JSON verdict object 覆寫到 `{result_file}`。格式為：
   {
     "verdict": "PASS",
     "checklist": [
@@ -74,6 +70,9 @@ plan: |
   依 .loop/generators/1-plan-generator.md：(重新)獨立推導並產出/精修 {control} 等規劃書（loop.config.yaml + state.json + phases/*.md）。
   🚨 收斂一律依 .loop/rules/convergence.md 協定執行（先不看舊版、從需求獨立重推 → 留下紀錄 → 僅在有實質差異時才改檔 → 一有實質差異即收斂歸零 → 有疑義從嚴算實質）。不要在此自訂收斂判準。
   在需要更新規劃書狀態或填寫 plan_changed_last 欄位時，請務必先閱讀並依循 .loop/rules/state-cli-guide.md 指引，呼叫系統提供的 `{state_cli}` 進行更新（例如設定 plan_changed_last 為 true/false）！
+  🚨 審查回饋指引：
+  請務必讀取 {control} 中 `plan` 物件下的 `gate_last_reason`（如果存在）。
+  若 `plan.gate_last_reason` 不為空（空字串 `""`），代表上一次生成的規劃書在審查時被退回，你**必須**針對該欄位中的失敗原因進行修正，避免下一輪發生同樣的審查失敗。
   寫檔只允許 .loop/，禁止寫框架。結束 git add -A && git commit。
   （Plan Gate 由獨立的審查輪負責，你這輪不需自審。）
 
@@ -83,6 +82,9 @@ plan_gate: |
   逐項檢查 Gate（需求全覆蓋 / 任務粒度 / 無循環依賴 / 停止可判讀 / 收斂就位 / 逃生門 / context防爆 / 框架唯讀 / 引擎可讀 / 輪數估算）。
   ❗只審查、不要修改任何規劃書檔（read-only verify）。
   在需要更新審查狀態（例如填寫 plan_gate_last 為 PASS/FAIL）時，請務必先閱讀並依循 .loop/rules/state-cli-guide.md 指引，呼叫系統提供的 `{state_cli}` 進行更新！
+  🚨 記錄失敗原因：
+  - 若審查結果為 **FAIL**，請務必再呼叫一次 `{state_cli} set plan_gate_last_reason "列出未過項目與具體修正建議"` 以記錄原因供下一輪規劃使用。
+  - 若審查結果為 **PASS**，請務必呼叫 `{state_cli} set plan_gate_last_reason ""` 將原因欄位清空。
   結束 git add -A && git commit。
 
 tree_decompose: |

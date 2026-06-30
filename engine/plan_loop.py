@@ -357,7 +357,8 @@ def _build_tree_decompose_prompt(cfg, fw, node_id, decomp_path, requirements):
     return fmt_prompt(tpl, framework=fw, node_id=node_id,
                       decomp_file=decomp_path, requirements=requirements,
                       max_files=str(mu.get("max_files", 3)),
-                      max_lines=str(mu.get("max_lines", 150)))
+                      max_lines=str(mu.get("max_lines", 150)),
+                      control=decomp_path)
 
 
 def _build_tree_gate_prompt(cfg, fw, node_id, decomp_path, requirements):
@@ -366,7 +367,8 @@ def _build_tree_gate_prompt(cfg, fw, node_id, decomp_path, requirements):
     return fmt_prompt(tpl, framework=fw, node_id=node_id,
                       decomp_file=decomp_path, requirements=requirements,
                       max_files=str(mu.get("max_files", 3)),
-                      max_lines=str(mu.get("max_lines", 150)))
+                      max_lines=str(mu.get("max_lines", 150)),
+                      control=decomp_path)
 
 
 def _run_tree_plan_locked(cfg, mode_override, lock_path=None):

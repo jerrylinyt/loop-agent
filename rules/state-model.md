@@ -60,3 +60,34 @@
 
 - 引擎透過呼叫 `state.py` 讀寫 `state.json`。
 
+---
+
+## 5. 狀態變更剛性約束與防護（非法操作防護）
+
+為確保狀態變更安全無虞，`state.py` 內建了多重的剛性校驗。任何違反以下規則的 CLI 操作均會被拒絕並報錯（回傳 exit code 1）：
+
+### 5.1 鍵值白名單與類型約束 (Key & Type Whitelist)
+- **寫入白名單限制**：使用 `set` 或 `incr` 更新欄位時，鍵值 (Key) 必須位於預設的白名單中（包含 `current_phase`、`last_round_mode`、計數器欄位如 `p{id}_consecutive_pass`、節點欄位 `node_{id}_{field}` 等）。未在白名單內之鍵值將被拒絕變更。
+- **數值遞增限制**：`incr` 指令僅適用於數值型鍵值（如 `consecutive_pass`、`total_validations`、`rounds_since_progress`、`stuck_level`、`depth`、`stable_rounds`、`reflow_count` 等）。非數值型欄位執行 `incr` 將報錯。
+
+### 5.2 狀態轉換守衛 (Guarded Transition)
+每次寫入時，引擎會對寫入前後的變更進行「守衛驗證」：
+- **交接人類旗標保護**：`human_required` 與 `plan_human_required` 一旦被設定為 `true`，**嚴禁**直接透過 `set` 修改回 `false`。必須一律透過明確的 resume 管道（如 `resume`、`dashboard_resume` 等 source）方能清除。
+- **階段不可逆向**：當前階段 `current_phase` 只能往前进（遞增），**嚴禁**逆向變更為較小的數值。若需要倒回，必須經由專屬的 `reset_plan` / `dashboard_reset_plan` 途徑。
+
+### 5.3 任務狀態單步轉移限制 (Task Status Transitions)
+變更任務狀態時（`task-status`），必須遵循嚴格的單步狀態轉移路徑：
+- **合法狀態轉移路徑**：
+  - `TODO` ➔ `DRAFTED` 或 `FROZEN`
+  - `DRAFTED` ➔ `CONVERGED`、`NEEDS_REVISION` 或 `FROZEN`
+  - `NEEDS_REVISION` ➔ `DRAFTED` 或 `FROZEN`
+  - `FROZEN` ➔ `TODO`、`DRAFTED` 或 `NEEDS_REVISION`
+  - `CONVERGED` ➔ `NEEDS_REVISION` 或 `FROZEN`
+  - *註：狀態與其自身（例如 `TODO` ➔ `TODO`）始終為合法轉移。*
+- **非法狀態轉移**：任何未列在上述合法路徑中的轉換皆為**非法**（例如：嚴禁從 `TODO` 直接改為 `CONVERGED`；嚴禁從 `NEEDS_REVISION` 直接改為 `CONVERGED` 等）。
+- **收斂門檻限制 (Convergence Gate)**：將任務改為 `CONVERGED` 之前，該任務的收斂計數 `conv` **必須**大於或等於設定的門檻（`threshold`，預設為 5）。否則寫入將直接報錯。
+
+### 5.4 實體唯一性約束 (Entity Uniqueness)
+- **任務唯一性**：使用 `task-add` 新增任務時，若該任務 ID 已存在於當前 Phase，將直接報錯。
+- **Issue 唯一性**：使用 `issue-add` 新增問題時，若該 Issue ID 已存在於狀態中，將直接報錯。
+
