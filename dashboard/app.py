@@ -12,17 +12,22 @@ from typing import List, Optional
 import yaml
 import json
 import hashlib
-
+import fnmatch
+import re
 
 app = FastAPI(title="Loop Engineering Dashboard")
 
-# Ensure dashboard templates folder exists
+# Ensure dashboard templates/frontend folder exists
 HERE = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(HERE, "templates")
+FRONTEND_DIST = os.path.join(HERE, "frontend", "dist")
 STATIC_DIR = os.path.join(HERE, "static")
-os.makedirs(STATIC_DIR, exist_ok=True)
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# Mount Vite compiled assets if dist exists
+if os.path.exists(FRONTEND_DIST):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
+else:
+    # Fallback to old static files
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 # Models
@@ -75,6 +80,8 @@ class ParallelAddRequest(BaseModel):
 class RejectRequest(BaseModel):
     subtree_id: str
 
+
+# Helper Functions
 def get_index_path():
     return os.path.expanduser("~/.loop/index.md")
 
@@ -122,7 +129,7 @@ def get_control_val(control_path: str, key: str) -> str | None:
             val = ctrl.get(key)
             if isinstance(val, bool):
                 return "true" if val else "false"
-            return str(val)
+            return str(val) if val is not None else ""
     except Exception:
         pass
     return None
@@ -167,45 +174,43 @@ def set_control_val(control_path: str, key: str, value: str):
             data = json.load(f)
 
         import re
-        m = re.match(r"^node_(\S+?)_(state|children|parent|depth|stable_rounds|reflow_count)$", key)
+        m = re.match(r"^node_(\S+?)_(state|stable_rounds|reflow_count)$", key)
         if m:
             nid = m.group(1)
             sub_key = m.group(2)
             if "tree" not in data:
-                data["tree"] = {"root": "root", "nodes": {}}
+                data["tree"] = {}
             if "nodes" not in data["tree"]:
                 data["tree"]["nodes"] = {}
             if nid not in data["tree"]["nodes"]:
                 data["tree"]["nodes"][nid] = {}
-            node = data["tree"]["nodes"][nid]
-            if sub_key == "children":
-                node["children"] = [c.strip() for c in value.split(",") if c.strip()]
-            elif sub_key in ("depth", "stable_rounds", "reflow_count"):
+            val = value
+            if sub_key in ("stable_rounds", "reflow_count"):
                 try:
-                    node[sub_key] = int(value)
+                    val = int(value)
                 except ValueError:
-                    node[sub_key] = 0
-            else:
-                node[sub_key] = value
-        elif re.match(r"^p(\d+)_(consecutive_pass|total_validations|last_result)$", key):
+                    val = 0
+            data["tree"]["nodes"][nid][sub_key] = val
+        elif key.startswith("p") and "_" in key:
             pm = re.match(r"^p(\d+)_(consecutive_pass|total_validations|last_result)$", key)
-            pid = pm.group(1)
-            sub_key = pm.group(2)
-            target_ph = None
-            for ph in data.get("phases", []):
-                if str(ph.get("id")) == pid:
-                    target_ph = ph
-                    break
-            if not target_ph:
-                target_ph = {"id": pid, "tasks": [], "coverage": []}
-                data.setdefault("phases", []).append(target_ph)
-            if sub_key in ("consecutive_pass", "total_validations"):
-                try:
-                    target_ph[sub_key] = int(value)
-                except ValueError:
-                    target_ph[sub_key] = 0
-            else:
-                target_ph[sub_key] = value
+            if pm:
+                pid = pm.group(1)
+                sub_key = pm.group(2)
+                target_ph = None
+                for ph in data.get("phases", []):
+                    if str(ph.get("id")) == pid:
+                        target_ph = ph
+                        break
+                if not target_ph:
+                    target_ph = {"id": pid, "tasks": [], "coverage": []}
+                    data.setdefault("phases", []).append(target_ph)
+                if sub_key in ("consecutive_pass", "total_validations"):
+                    try:
+                        target_ph[sub_key] = int(value)
+                    except ValueError:
+                        target_ph[sub_key] = 0
+                else:
+                    target_ph[sub_key] = value
         elif key == "current_phase":
             data["current_phase"] = value
         elif key == "plan_version":
@@ -372,7 +377,6 @@ def parse_index():
                         try:
                             with open(lock_path, "r", encoding="utf-8") as lf:
                                 lock_data = lf.read().strip()
-                                # pid=1234 started=...
                                 if lock_data.startswith("pid="):
                                     pid_part = lock_data.split(" ")[0]
                                     pid = int(pid_part.split("=")[1])
@@ -425,6 +429,407 @@ def get_project_by_id(proj_id: str):
             return p
     return None
 
+def index_row_matches(line: str, repo: str, ws: str) -> bool:
+    parts = [p.strip() for p in line.split("|")][1:-1]
+    if len(parts) >= 3:
+        # parts[1] is repo path, parts[2] is workspace name
+        return os.path.realpath(parts[1]) == os.path.realpath(repo) and parts[2] == ws
+    return False
+
+def append_index_row(repo: str, ws: str, phase="-", stuck="-", status="initialized"):
+    index_path = get_index_path()
+    os.makedirs(os.path.dirname(index_path), exist_ok=True)
+    
+    lines = []
+    if os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            
+    # Check if exists, update it if so
+    found = False
+    for i, line in enumerate(lines):
+        if line.strip().startswith("|") and not set(line.strip()) <= set("|-: "):
+            if index_row_matches(line, repo, ws):
+                repo_name = os.path.basename(repo)
+                updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                lines[i] = f"| {repo_name} | {repo} | {ws} | {phase} | {stuck} | {status} | {updated_at} |\n"
+                found = True
+                break
+                
+    if not found:
+        # Create table headers if empty
+        if not lines:
+            lines.append("| Repo | Path | Workspace | Phase | Stuck | Status | Updated At |\n")
+            lines.append("| --- | --- | --- | --- | --- | --- | --- |\n")
+        repo_name = os.path.basename(repo)
+        updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"| {repo_name} | {repo} | {ws} | {phase} | {stuck} | {status} | {updated_at} |\n")
+        
+    with open(index_path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
+# --- NEW WORKSPACE API ENDPOINTS ---
+
+@app.get("/api/workspaces")
+def list_workspaces():
+    projects = parse_index()
+    workspaces = []
+    for p in projects:
+        control_path = os.path.join(p["repo"], ".loop", p["workspace"], "state.json")
+        direction = "neutral"
+        headline = "Idle"
+        why = ""
+        mode = "flat"
+        
+        state_data = {}
+        if os.path.exists(control_path):
+            try:
+                with open(control_path, "r", encoding="utf-8") as sf:
+                    state_data = json.load(sf)
+                mode = state_data.get("mode", "flat")
+            except Exception:
+                pass
+                
+        status = "idle"
+        if p["is_running"]:
+            status = "running"
+        
+        r_human = get_control_val(control_path, "human_required")
+        r_plan_human = get_control_val(control_path, "plan_human_required")
+        if r_human == "true" or r_plan_human == "true":
+            status = "human_required"
+            
+        r_done = get_control_val(control_path, "stop_condition_met")
+        if r_done == "true":
+            status = "completed"
+            
+        stuck_level = 0
+        try:
+            stuck_level = int(p["stuck"]) if p["stuck"] != "-" else 0
+        except ValueError:
+            pass
+            
+        rounds_since_progress = 0
+        try:
+            rounds_since_progress = int(get_control_val(control_path, "plan_rounds_since_progress") or "0")
+        except ValueError:
+            pass
+            
+        if status == "completed":
+            direction = "forward"
+        elif status == "human_required":
+            direction = "neutral"
+        elif stuck_level > 0 or rounds_since_progress > 2:
+            direction = "stalled"
+        elif rounds_since_progress > 0:
+            direction = "neutral"
+        else:
+            r_last = get_control_val(control_path, "last_round_result")
+            if r_last == "PASS":
+                direction = "forward"
+            elif r_last == "FAIL":
+                direction = "backward"
+            else:
+                direction = "neutral"
+                
+        if status == "running":
+            headline = f"Running Phase {p['phase']}"
+            why = f"Stuck level is {stuck_level}. Active in {p['workspace']}."
+        elif status == "human_required":
+            headline = "Needs Human Input"
+            why = get_control_val(control_path, "human_required_msg") or get_control_val(control_path, "plan_human_required_msg") or "Waiting for confirmation."
+        elif status == "completed":
+            headline = "Loop Completed"
+            why = "All phases and tasks have converged successfully!"
+        else:
+            headline = f"Workspace is {status}"
+            why = f"Last updated at {p['updated_at']}."
+            
+        workspaces.append({
+            "id": p["id"],
+            "repo": p["repo"],
+            "repo_name": p["repo_name"],
+            "workspace": p["workspace"],
+            "mode": mode,
+            "status": status,
+            "direction": direction,
+            "headline": headline,
+            "why": why,
+            "current": {
+                "phase": p["phase"],
+                "active_leaf": get_control_val(control_path, "active_leaf") or None,
+                "stuck_level": stuck_level,
+                "rounds_since_progress": rounds_since_progress,
+                "model_tier": get_control_val(control_path, "model_tier") or "default"
+            },
+            "run": {
+                "is_running": p["is_running"],
+                "pid": p["pid"],
+                "started_at": p["started_at"],
+                "heartbeat_age": p["heartbeat_age"]
+            },
+            "updated_at": p["updated_at"]
+        })
+    return workspaces
+
+@app.get("/api/workspaces/{id}/overview")
+def get_workspace_overview(id: str):
+    workspaces = list_workspaces()
+    for w in workspaces:
+        if w["id"] == id:
+            status = w["status"]
+            next_action = {
+                "kind": "wait",
+                "label": "No action needed",
+                "detail": "Engine is running stably."
+            }
+            if status == "human_required":
+                next_action = {
+                    "kind": "input",
+                    "label": "Resume Engine",
+                    "detail": "Review the reason in timeline/logs and click Resume to continue."
+                }
+            elif status == "idle":
+                next_action = {
+                    "kind": "start",
+                    "label": "Start Loop",
+                    "detail": "Click Start to begin running the automated loop engine."
+                }
+            elif status == "completed":
+                next_action = {
+                    "kind": "review",
+                    "label": "All Completed",
+                    "detail": "The task is complete. No further actions required."
+                }
+            elif status == "preflight_blocked":
+                next_action = {
+                    "kind": "configure",
+                    "label": "Fix Preflight Issues",
+                    "detail": "Please configure model and build commands before starting."
+                }
+            w["next_action"] = next_action
+            return w
+    raise HTTPException(status_code=404, detail="Workspace not found")
+
+@app.post("/api/workspaces/{id}/start")
+def start_workspace(id: str, req: StartRequest):
+    return start_project(id, req)
+
+@app.post("/api/workspaces/{id}/stop")
+def stop_workspace(id: str):
+    return stop_project(id)
+
+@app.post("/api/workspaces/{id}/resume")
+def resume_workspace(id: str):
+    return resume_project(id)
+
+@app.post("/api/workspaces/{id}/clear-lock")
+def clear_workspace_lock(id: str):
+    return clear_lock(id)
+
+@app.get("/api/workspaces/{id}/preflight")
+def get_workspace_preflight(id: str):
+    return get_preflight(id)
+
+@app.get("/api/workspaces/{id}/config")
+def get_workspace_config(id: str):
+    return get_config(id)
+
+@app.post("/api/workspaces/{id}/config")
+def save_workspace_config(id: str, req: ConfigUpdateRequest):
+    return save_config(id, req)
+
+@app.post("/api/workspaces/{id}/config-wizard")
+def apply_workspace_config_wizard(id: str, req: ConfigWizardRequest):
+    return apply_config_wizard(id, req)
+
+@app.get("/api/workspaces/{id}/tree")
+def get_workspace_tree(id: str):
+    return get_project_tree(id)
+
+@app.post("/api/workspaces/{id}/reject")
+def reject_workspace_node(id: str, req: RejectRequest):
+    return reject_project(id, req)
+
+@app.get("/api/workspaces/{id}/timeline")
+def get_workspace_timeline(id: str, limit: int = 100):
+    proj = get_project_by_id(id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    rounds_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "rounds.jsonl")
+    if not os.path.exists(rounds_path):
+        return []
+        
+    events = []
+    try:
+        # Efficient O(1) parsing from tail
+        lines = get_last_n_lines(rounds_path, limit * 2)
+        for line in lines:
+            line_str = line.strip()
+            if not line_str:
+                continue
+            try:
+                record = json.loads(line_str)
+            except Exception:
+                continue
+                
+            rec_type = record.get("type")
+            ts = record.get("ts", "")
+            
+            severity = "info"
+            title = "Event"
+            detail = ""
+            event_type = "unknown"
+            
+            if rec_type in ("loop_complete", "loop_completed"):
+                event_type = "loop_completed"
+                severity = "success"
+                title = "Loop Completed Successfully!"
+                detail = record.get('message', 'All stages and criteria have converged.')
+            elif rec_type == "review_revert":
+                event_type = "review_reverted"
+                severity = "error"
+                title = "Git Review Gate Reverted Changes"
+                detail = record.get('message', 'Validation failed or review gate rejected modifications.')
+            elif rec_type == "human_required":
+                event_type = "human_required"
+                severity = "warning"
+                title = "Human Intervention Required"
+                detail = record.get('message', 'An action is required from you to proceed.')
+            elif rec_type == "round_finished":
+                result = record.get("result", "UNKNOWN")
+                phase = record.get("phase", "?")
+                
+                if result == "PASS":
+                    event_type = "round_passed"
+                    severity = "success"
+                    title = f"Round {record.get('round')} Passed"
+                    detail = f"Phase {phase} validation succeeded."
+                    
+                    if record.get("progressed"):
+                        event_type = "progress_made"
+                        title = "Progress Made!"
+                        detail = f"Phase {phase} pass counter advanced."
+                else:
+                    event_type = "round_failed"
+                    severity = "error"
+                    title = f"Round {record.get('round')} Failed"
+                    detail = f"Phase {phase} validation failed."
+                    
+                    if record.get("stuck_level", 0) > 0:
+                        event_type = "model_escalated"
+                        severity = "warning"
+                        title = f"Model Escalated (Stuck Level {record.get('stuck_level')})"
+                        detail = f"Switched to model tier: {record.get('model_tier') or 'thinking'} to resolve stalling."
+            
+            if event_type != "unknown":
+                events.append({
+                    "ts": ts,
+                    "type": event_type,
+                    "severity": severity,
+                    "title": title,
+                    "detail": detail
+                })
+    except Exception as e:
+        print(f"Error reading timeline: {e}")
+        
+    return list(reversed(events))[:limit]
+
+@app.get("/api/workspaces/{id}/progress")
+def get_workspace_progress(id: str, limit: int = 200):
+    proj = get_project_by_id(id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    rounds_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "rounds.jsonl")
+    if not os.path.exists(rounds_path):
+        return []
+        
+    records = []
+    try:
+        for line in get_last_n_lines(rounds_path, limit):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except Exception:
+                continue
+            if record.get("type") == "round_finished":
+                records.append({
+                    "round": record.get("round", 0),
+                    "ts": record.get("ts", ""),
+                    "phase": str(record.get("phase", "1")),
+                    "result": record.get("result", "UNKNOWN"),
+                    "progressed": record.get("progressed", False),
+                    "direction": "forward" if record.get("result") == "PASS" else "backward",
+                    "stuck_level": record.get("stuck_level", 0),
+                    "rounds_since_progress": record.get("rounds_since_progress", 0),
+                    "model_tier": record.get("model_tier", "default"),
+                    "fail_fingerprint": record.get("fail_fingerprint"),
+                    "summary": record.get("summary", "Round execution finished.")
+                })
+    except Exception as e:
+        print(f"Error reading progress: {e}")
+    return records
+
+@app.get("/api/workspaces/{id}/logs/{log_type}")
+def stream_workspace_logs(id: str, log_type: str, tail: int = 500):
+    return stream_logs(id, log_type, tail)
+
+@app.get("/api/workspaces/{id}/logs/{log_type}/download")
+def download_workspace_log(id: str, log_type: str):
+    return download_log(id, log_type)
+
+@app.get("/api/workspaces/{id}/diagnostics")
+def get_workspace_diagnostics(id: str):
+    proj = get_project_by_id(id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    state_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "state.json")
+    raw_state = {}
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                raw_state = json.load(f)
+        except Exception:
+            pass
+            
+    diff_data = get_project_diff(id)
+    
+    return {
+        "raw_state": raw_state,
+        "git_diff": diff_data,
+        "config_path": proj["config_path"],
+        "lock_path": os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "run.lock")
+    }
+
+@app.get("/api/workspaces/{id}/doc")
+def get_workspace_doc(id: str, path: str):
+    return get_project_doc(id, path)
+
+@app.get("/api/workspaces/{id}/diff")
+def get_workspace_diff(id: str):
+    return get_project_diff(id)
+
+@app.post("/api/workspaces/init")
+def workspace_init(req: InitRequest):
+    return init_project(req)
+
+@app.post("/api/workspaces/add")
+def workspace_add(req: AddProjectRequest):
+    return add_project(req)
+
+@app.delete("/api/workspaces/{id}")
+def untrack_workspace(id: str):
+    return untrack_project(id)
+
+
+# --- OLD PROJECT API ENDPOINTS (STIPPLED / ALIASED FOR COMPATIBILITY) ---
+
 @app.get("/api/projects", response_model=List[ProjectStatus])
 def list_projects():
     return parse_index()
@@ -455,7 +860,6 @@ def start_project(proj_id: str, req: StartRequest):
     framework_dir = os.path.dirname(HERE)
     run_py = os.path.join(framework_dir, "engine", "run.py")
     
-    # Spawn subprocess
     try:
         state_dir = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state")
         os.makedirs(state_dir, exist_ok=True)
@@ -489,7 +893,6 @@ def init_project(req: InitRequest):
             raise HTTPException(status_code=500, detail=f"Init failed: {result.stderr or result.stdout}")
             
         append_index_row(repo_path, req.workspace_name, status="initialized")
-                
         return {"status": "initialized", "output": result.stdout}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -527,7 +930,6 @@ def add_project(req: AddProjectRequest):
             status = r_last
             
     append_index_row(repo_path, req.workspace_name, phase=phase, stuck=stuck, status=status)
-                
     return {"status": "added"}
 
 @app.post("/api/parallel/add")
@@ -548,37 +950,24 @@ def add_parallel_worktree(req: ParallelAddRequest):
         workspace = req.branch.strip().replace("/", "-")
     if req.target_path:
         cmd.extend(["--path", os.path.abspath(os.path.expanduser(req.target_path))])
-    base_ref = (req.base_ref or "").strip()
-    if base_ref:
-        cmd.extend(["--base", base_ref])
+    if req.base_ref:
+        cmd.extend(["--base", req.base_ref])
 
     try:
-        result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, encoding="utf-8")
+        # run parallel.py
+        result = subprocess.run(cmd, cwd=framework_dir, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Parallel worktree creation failed: {result.stderr or result.stdout}")
+        
+        # parallel add automatically initialises the workspace, so we track it
+        target_wt_path = os.path.join(os.path.dirname(repo_path), workspace)
+        if req.target_path:
+            target_wt_path = os.path.abspath(os.path.expanduser(req.target_path))
+            
+        append_index_row(target_wt_path, workspace, status="initialized")
+        return {"status": "added", "output": result.stdout}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to run parallel.py: {e}")
-
-    if result.returncode != 0:
-        raise HTTPException(status_code=500, detail=result.stderr or result.stdout or "parallel.py add failed")
-
-    target_path = None
-    if req.target_path:
-        target_path = os.path.abspath(os.path.expanduser(req.target_path))
-    else:
-        sanitized = req.branch.strip().replace("/", "-")
-        repo_root_res = subprocess.run(["git", "-C", repo_path, "rev-parse", "--show-toplevel"], capture_output=True, text=True, encoding="utf-8")
-        repo_root = os.path.abspath(repo_root_res.stdout.strip()) if repo_root_res.returncode == 0 else repo_path
-        target_path = os.path.join(os.path.dirname(repo_root), f"{os.path.basename(repo_root)}-{sanitized}")
-
-    config_path = os.path.join(target_path, ".loop", workspace, "loop.config.yaml")
-    if os.path.exists(config_path):
-        append_index_row(target_path, workspace, status="tracked")
-
-    return {
-        "status": "created",
-        "repo_path": target_path,
-        "workspace": workspace,
-        "output": result.stdout
-    }
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/projects/{proj_id}/human-context")
 def get_human_context(proj_id: str):
@@ -624,9 +1013,6 @@ def resume_project(proj_id: str):
         
     control_path = os.path.join(proj["repo"], ".loop", proj["workspace"], "state.json")
 
-    # Resume mode comes from loop.config.yaml's generation.mode (the real auto/gated
-    # source). Note: state.json last_round_mode stores per-round descriptions
-    # (e.g. "驗證"/"中斷"), NOT the generation mode — do not read it for this.
     mode_arg = "auto"
     try:
         with open(proj["config_path"], "r", encoding="utf-8") as f:
@@ -685,14 +1071,12 @@ def untrack_project(proj_id: str):
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    if proj["is_running"]:
-        raise HTTPException(status_code=400, detail="Cannot untrack a running project. Stop it first.")
-        
     index_path = get_index_path()
     if not os.path.exists(index_path):
-        raise HTTPException(status_code=500, detail="Index file not found")
+        return {"status": "untracked"}
         
     try:
+        lines = []
         with open(index_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
             
@@ -717,11 +1101,11 @@ def stop_project(proj_id: str):
     proj = get_project_by_id(proj_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+        
     pid = proj["pid"]
     if not pid:
         raise HTTPException(status_code=400, detail="Not running or no PID found in run.lock")
-    
+        
     try:
         parent = psutil.Process(pid)
         for child in parent.children(recursive=True):
@@ -731,15 +1115,20 @@ def stop_project(proj_id: str):
         # Clean up lock file
         lock_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "run.lock")
         if os.path.exists(lock_path):
-            os.remove(lock_path)
-            
+            try:
+                os.remove(lock_path)
+            except Exception:
+                pass
         return {"status": "stopped"}
     except psutil.NoSuchProcess:
-        # Maybe clean up stale lock file
+        # Lock exists but process is already dead
         lock_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "run.lock")
         if os.path.exists(lock_path):
-            os.remove(lock_path)
-        return {"status": "stopped (stale lock removed)"}
+            try:
+                os.remove(lock_path)
+            except Exception:
+                pass
+        return {"status": "stopped"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -748,7 +1137,7 @@ def clear_lock(proj_id: str):
     proj = get_project_by_id(proj_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+        
     lock_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "run.lock")
     if os.path.exists(lock_path):
         try:
@@ -762,7 +1151,7 @@ def get_config(proj_id: str):
     proj = get_project_by_id(proj_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+        
     config_path = proj["config_path"]
     if not os.path.exists(config_path):
         raise HTTPException(status_code=404, detail="Config file not found")
@@ -779,12 +1168,10 @@ def save_config(proj_id: str, req: ConfigUpdateRequest):
     proj = get_project_by_id(proj_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+        
     config_path = proj["config_path"]
     try:
-        # Validate yaml
         yaml.safe_load(req.content)
-        
         with open(config_path, "w", encoding="utf-8") as f:
             f.write(req.content)
         return {"status": "saved"}
@@ -879,12 +1266,9 @@ def requirements_path_for_project(proj: dict) -> str:
     return os.path.join(proj["repo"], ".loop", proj["workspace"], "REQUIREMENTS.md")
 
 def has_placeholder(value) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        stripped = value.strip()
-        return not stripped or ("<" in stripped and ">" in stripped)
-    return False
+    if not value or not isinstance(value, str):
+        return False
+    return "[TODO" in value or "<TODO" in value or "PLACEHOLDER" in value or "__" in value
 
 @app.get("/api/projects/{proj_id}/preflight")
 def get_preflight(proj_id: str):
@@ -967,7 +1351,6 @@ def get_project_tree(proj_id: str):
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    # 1. 優先從 state.json 讀取樹拓撲
     state_json = os.path.join(proj["repo"], ".loop", proj["workspace"], "state.json")
     if os.path.exists(state_json):
         try:
@@ -1006,7 +1389,7 @@ def get_project_tree(proj_id: str):
         except Exception as e:
             print(f"Failed to load tree from state.json: {e}")
 
-    # 2. Fallback 到舊有的 TREE.md 解析
+    # Fallback to TREE.md
     tree_md = os.path.join(proj["repo"], ".loop", proj["workspace"], "TREE.md")
     if not os.path.exists(tree_md):
         return {"tree_enabled": False, "nodes": [], "root": None}
@@ -1100,16 +1483,13 @@ async def log_generator(log_path: str, tail: int = 500):
         if os.path.exists(log_path):
             size_at_start = os.path.getsize(log_path)
 
-        # 1. Send historical lines
         history_lines = get_last_n_lines(log_path, tail)
         for line in history_lines:
             safe_line = line.replace('\r', '').replace('\n', ' ')
             yield f"data: {safe_line}\n\n"
             
-        # 2. Send divider
         yield "data: --- end of history (live) ---\n\n"
         
-        # 3. Stream new lines
         with open(log_path, "r", encoding="utf-8", errors="replace") as f:
             f.seek(size_at_start)
             while True:
@@ -1133,7 +1513,6 @@ def stream_logs(proj_id: str, log_type: str, tail: int = 500):
         
     log_file = f"{log_type}.log"
     log_path = os.path.join(proj["repo"], ".loop", proj["workspace"], log_file)
-    
     return StreamingResponse(log_generator(log_path, tail), media_type="text/event-stream")
 
 @app.get("/api/projects/{proj_id}/logs/{log_type}/download")
@@ -1155,102 +1534,11 @@ def download_log(proj_id: str, log_type: str):
 
 @app.get("/api/projects/{proj_id}/rounds")
 def get_project_rounds(proj_id: str, limit: int = 200):
-    proj = get_project_by_id(proj_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    rounds_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "rounds.jsonl")
-    if not os.path.exists(rounds_path):
-        return []
-
-    import json
-    records = []
-    for line in get_last_n_lines(rounds_path, limit):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            record = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if record.get("type") == "round_finished":
-            records.append(record)
-    return records
+    return get_workspace_progress(proj_id, limit)
 
 @app.get("/api/projects/{proj_id}/activity")
 def get_activity(proj_id: str, limit: int = 50):
-    proj = get_project_by_id(proj_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="Project not found")
-        
-    rounds_path = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state", "rounds.jsonl")
-    if not os.path.exists(rounds_path):
-        return []
-        
-    import json
-    events = []
-    
-    try:
-        with open(rounds_path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                line_str = line.strip()
-                if not line_str:
-                    continue
-                try:
-                    record = json.loads(line_str)
-                except Exception:
-                    continue
-                
-                rec_type = record.get("type")
-                ts = record.get("ts", "")
-                
-                if rec_type == "loop_complete":
-                    events.append({
-                        "ts": ts,
-                        "type": "complete",
-                        "text": f"🎉 {record.get('message', 'LOOP COMPLETE')}"
-                    })
-                elif rec_type == "review_revert":
-                    events.append({
-                        "ts": ts,
-                        "type": "review_revert",
-                        "text": f"🚨 {record.get('message', 'Git Review Gate reverted changes')}"
-                    })
-                elif rec_type == "human_required":
-                    events.append({
-                        "ts": ts,
-                        "type": "human_required",
-                        "text": f"⛔ {record.get('message', 'Human intervention required')}"
-                    })
-                elif rec_type == "round_finished":
-                    # Stuck upgrade
-                    if record.get("stuck_level", 0) > 0:
-                        events.append({
-                            "ts": ts,
-                            "type": "model_upgrade",
-                            "text": f"⬆️ Stuck level {record.get('stuck_level')} -> Model escalated ({record.get('model_tier')})"
-                        })
-                    # Progress / Convergence
-                    if record.get("progressed"):
-                        if record.get("loop_type") == "tree" and record.get("leaf"):
-                            events.append({
-                                "ts": ts,
-                                "type": "leaf_converged",
-                                "text": f"🍃 Leaf [{record.get('leaf')}] converged"
-                            })
-                        else:
-                            events.append({
-                                "ts": ts,
-                                "type": "progress",
-                                "text": f"↩️ Progress made in Phase {record.get('phase')}"
-                            })
-    except Exception as e:
-        print(f"Error reading rounds.jsonl: {e}")
-        
-    # Return the most recent events up to the limit
-    return list(reversed(events))[:limit]
-
-import fnmatch
+    return get_workspace_timeline(proj_id, limit)
 
 @app.get("/api/projects/{proj_id}/doc")
 def get_project_doc(proj_id: str, path: str):
@@ -1297,49 +1585,6 @@ def get_project_doc(proj_id: str, path: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
-
-def get_control_val(control_path: str, key: str) -> str | None:
-    if not os.path.exists(control_path):
-        return None
-    try:
-        with open(control_path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
-            
-        def norm(v):
-            if isinstance(v, bool):
-                return "true" if v else "false"
-            v_str = str(v).strip()
-            if v_str.lower() == "true":
-                return "true"
-            if v_str.lower() == "false":
-                return "false"
-            return v_str
-            
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                yaml_part = parts[1]
-                data = yaml.safe_load(yaml_part) or {}
-                val = data.get(key)
-                if val is not None:
-                    return norm(val)
-        if "```yaml" in content:
-            parts = content.split("```yaml", 1)[1].split("```", 1)
-            if len(parts) >= 2:
-                yaml_part = parts[0]
-                data = yaml.safe_load(yaml_part) or {}
-                val = data.get(key)
-                if val is not None:
-                    return norm(val)
-        import re
-        pat = re.compile(rf"^\s*{re.escape(key)}\s*:\s*(.*?)\s*$")
-        for line in content.splitlines():
-            m = pat.match(line)
-            if m:
-                return norm(m.group(1).split("#", 1)[0].strip().strip('"'))
-    except Exception:
-        pass
-    return None
 
 @app.get("/api/projects/{proj_id}/diff")
 def get_project_diff(proj_id: str):
@@ -1391,10 +1636,21 @@ def get_project_diff(proj_id: str):
         "truncated": truncated
     }
 
+
+# Serve React app
 @app.get("/")
-def serve_index():
-    index_html = os.path.join(TEMPLATES_DIR, "index.html")
-    if not os.path.exists(index_html):
-        return HTMLResponse("<h1>Dashboard templates not found.</h1>")
-    with open(index_html, "r", encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+def serve_dashboard():
+    index_path = os.path.join(FRONTEND_DIST, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    
+    # Fallback to old index.html
+    old_index_html = os.path.join(STATIC_DIR, "index.html")
+    if not os.path.exists(old_index_html):
+        old_index_html = os.path.join(HERE, "templates", "index.html")
+        
+    if os.path.exists(old_index_html):
+        with open(old_index_html, "r", encoding="utf-8") as f:
+            return HTMLResponse(f.read())
+            
+    return HTMLResponse("<h1>Dashboard frontend not compiled yet. Please build the frontend first.</h1>")

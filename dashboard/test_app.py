@@ -2,6 +2,7 @@ import os
 import tempfile
 import pytest
 import psutil
+import json
 from dashboard.app import get_last_n_lines, parse_index, get_control_val, set_control_val, parse_control_file, index_row_matches
 
 def test_get_last_n_lines():
@@ -657,7 +658,7 @@ def test_stop_request_and_human_details():
             json.dump({"current_phase": "1", "control": {}}, f)
             
         # Key missing initially
-        assert get_val(control_path, "human_required_reason") is None
+        assert get_val(control_path, "human_required_reason") in (None, "")
         
         # set_human_required sets reason and msg
         set_human_required(control_path, True, "some_reason", "Some Message Detail")
