@@ -159,7 +159,15 @@ def fmt_prompt(template: str, **kw) -> str:
         base_dir = os.path.dirname(os.path.abspath(control)) if control else os.path.abspath(".")
         state_json_path = os.path.join(base_dir, "state.json")
         state_py_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.py")
-        kw["state_cli"] = f"python {state_py_path} --state {state_json_path}"
+        run_id = kw.get("run_id", "") or os.environ.get("LOOP_RUN_ID", "")
+        round_no = kw.get("round", "") or os.environ.get("LOOP_ROUND_NO", "")
+        # Use the `--flag=value` form (not `--flag value`), so an empty value
+        # never swallows the next shell token (the agent's subcommand, e.g.
+        # `set`) as this flag's argument.
+        kw["state_cli"] = (
+            f"python {state_py_path} --state {state_json_path}"
+            f" --run-id={run_id} --round={round_no}"
+        )
 
     for k, v in kw.items():
         out = out.replace("{" + k + "}", str(v))

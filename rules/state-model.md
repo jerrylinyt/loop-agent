@@ -56,9 +56,12 @@
 - **數值遞增限制**：`incr` 指令僅適用於數值型鍵值（如 `consecutive_pass`、`total_validations`、`rounds_since_progress`、`stuck_level` 等）。非數值型欄位執行 `incr` 將報錯。
 
 ### 5.2 狀態轉換守衛 (Guarded Transition)
-每次寫入時，引擎會對寫入前後的變更進行「守衛驗證」：
+每次寫入時，系統會對寫入前後的變更進行「守衛驗證」：
 - **交接人類旗標保護**：`human_required` 與 `plan_human_required` 一旦被設定為 `true`，**嚴禁**直接透過 `set` 修改回 `false`。必須一律透過明確的 resume 管道（如 `resume`、`dashboard_resume` 等 source）方能清除。
-- **階段不可逆向**：當前階段 `current_phase` 只能往前进（遞增），**嚴禁**逆向變更為較小的數值。若需要倒回，必須經由專屬的 `reset_plan` / `dashboard_reset_plan` 途徑。
+- **階段不可逆向與推進限制**：
+  - 當前階段 `current_phase` 只能往前进（遞增），**嚴禁**逆向變更為較小的數值。若需要倒回，必須經由專屬的 `reset_plan` / `dashboard_reset_plan` 途徑。
+  - **禁止跨多階跳躍**：`current_phase` 每次推進最多只能前進 1 階（如 1 ➔ 2 階為合法；但 1 ➔ 3 階為非法）。
+  - **前進門檻檢查**：當前進到相鄰下一階段（`before_phase + 1`）時，前一階段的所有任務必須皆已處於 `CONVERGED` 狀態，且全域 `BLOCKING` 類型之 Issue 數量必須為 0，否則寫入會被拒絕。
 
 ### 5.3 任務狀態單步轉移限制 (Task Status Transitions)
 變更任務狀態時（`task-status`），必須遵循嚴格的單步狀態轉移路徑：
@@ -76,3 +79,8 @@
 - **任務唯一性**：使用 `task-add` 新增任務時，若該任務 ID 已存在於當前 Phase，將直接報錯。
 - **Issue 唯一性**：使用 `issue-add` 新增問題時，若該 Issue ID 已存在於狀態中，將直接報錯。
 
+### 5.5 任務推進配額限制 (One-Task Progress Quota)
+- **實質任務前進限額**：當 CLI 帶有非空的 `run_id` 與 `round` 時，系統會在 `control` 中記錄 `last_task_progress_run_id`。在同一個 round 內只允許進行**最多一次**實質任務推進（定義為任務狀態從 `TODO` ➔ `DRAFTED`，或從 `DRAFTED` ➔ `CONVERGED`）。重複推進將被拒絕。
+
+### 5.6 收斂自增防灌水限制 (Conv Increment Restrictions)
+- **重複簽章防堵**：變更任務收斂計數器（`task-conv --incr`）時，會綁定當前「Phase + Git Commit」組成的進展簽章。在簽章未改變的情況下，禁止對同一任務連續執行兩次自增，以防收斂計數灌水。

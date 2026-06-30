@@ -82,14 +82,16 @@ def plan_files_changed(cfg):
     return False
 
 
-def build_gen_prompt(cfg, fw, plan_md, requirements):
+def build_gen_prompt(cfg, fw, plan_md, requirements, round_no=""):
     tpl = cfg["agent"]["prompts"]["plan"]
-    return fmt_prompt(tpl, framework=fw, plan_md=plan_md, requirements=requirements, control=cfg["control"])
+    return fmt_prompt(tpl, framework=fw, plan_md=plan_md, requirements=requirements, control=cfg["control"],
+                       run_id=cfg.get("run_id", ""), round=round_no)
 
 
-def build_gate_prompt(cfg, fw, plan_md, requirements):
+def build_gate_prompt(cfg, fw, plan_md, requirements, round_no=""):
     tpl = cfg["agent"]["prompts"]["plan_gate"]
-    return fmt_prompt(tpl, framework=fw, plan_md=plan_md, requirements=requirements, control=cfg["control"])
+    return fmt_prompt(tpl, framework=fw, plan_md=plan_md, requirements=requirements, control=cfg["control"],
+                       run_id=cfg.get("run_id", ""), round=round_no)
 
 
 def main():
@@ -200,7 +202,7 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
         ts = datetime.now().strftime("%F %T")
         hb(f"▶ Plan Cycle {i} · Round A 生成 開始 ({ts})  模型階層={tier}")
         log_both(f"\n════════════ Plan Cycle {i} · Round A 生成 ({ts}) tier={tier} ════════════")
-        cmd = build_cmd(cfg, gen_model, build_gen_prompt(cfg, fw, plan_md, req))
+        cmd = build_cmd(cfg, gen_model, build_gen_prompt(cfg, fw, plan_md, req, round_no=i))
         git_head_before = git_head()
         git_head_before = git_head()
         rc, killed = run_agent(cmd, cfg)
@@ -238,7 +240,7 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
         hb(f"▶ Plan Cycle {i} · Round B 審查(獨立) 開始 ({ts})")
         log_both(f"\n════════════ Plan Cycle {i} · Round B 審查 ({ts}) ════════════")
         review_model = select_model(cfg, "review", 0)
-        cmd = build_cmd(cfg, review_model, build_gate_prompt(cfg, fw, plan_md, req))
+        cmd = build_cmd(cfg, review_model, build_gate_prompt(cfg, fw, plan_md, req, round_no=i))
         rc, killed = run_agent(cmd, cfg)
         if killed:
             hb(f"  Round B 被 watchdog 中斷（{killed}），本 cycle 視為無進展。")

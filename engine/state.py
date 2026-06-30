@@ -4,8 +4,13 @@ import json
 import logging
 import subprocess
 from collections import deque
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+class StateFileCorruptError(RuntimeError):
+    pass
 
 # ─────────────── JSON BACKING STORE 讀寫 ───────────────
 
@@ -23,7 +28,7 @@ def load_state_json(state_json_path: str) -> dict:
             return json.load(f)
     except Exception as e:
         logger.error(f"Failed to load state JSON {state_json_path}: {e}")
-        return {}
+        raise StateFileCorruptError(f"state file is corrupt: {state_json_path}") from e
 
 
 def save_state_json(state_json_path: str, data: dict):
@@ -52,6 +57,7 @@ STATIC_KEYS = {
     "human_required_msg", "human_required_since", "suggested_human_action",
     "human_required_source", "human_required_run_id",
     "review_invalid_streak", "last_safe_sha", "stop_condition_met", "blocking_issues",
+    "last_task_progress_run_id",
     "tree_enabled", "tree_root", "tree_total_nodes", "tree_total_leaves", "tree_max_depth",
     "plan_human_required", "plan_human_required_code", "plan_human_required_reason",
     "plan_human_required_msg", "plan_human_required_since", "plan_suggested_human_action",
@@ -121,7 +127,7 @@ def get_val_from_json_data(data: dict, key: str) -> str | None:
         "enhanced_rounds_used", "human_required", "human_required_code",
         "human_required_reason", "human_required_msg", "human_required_since",
         "suggested_human_action", "human_required_source", "human_required_run_id",
-        "review_invalid_streak", "last_safe_sha",
+        "review_invalid_streak", "last_safe_sha", "last_task_progress_run_id",
         "stop_condition_met"
     }
     if key in control_keys:
@@ -201,7 +207,7 @@ def set_val_in_json_data(data: dict, key: str, value: str):
         "enhanced_rounds_used", "human_required", "human_required_code",
         "human_required_reason", "human_required_msg", "human_required_since",
         "suggested_human_action", "human_required_source", "human_required_run_id",
-        "review_invalid_streak", "last_safe_sha",
+        "review_invalid_streak", "last_safe_sha", "last_task_progress_run_id",
         "stop_condition_met", "blocking_issues"
     }
     if key in control_keys:
@@ -262,8 +268,6 @@ def _state_revision(data: dict) -> int:
 
 
 def _stamp_last_writer(data: dict, source: str, run_id: str | None):
-    from datetime import datetime
-
     data["schema_version"] = max(as_int(data.get("schema_version"), 1), 2)
     data["state_revision"] = _state_revision(data) + 1
     data["last_writer"] = {
@@ -293,6 +297,238 @@ def _validate_guarded_transition(before: dict, after: dict, source: str):
     after_phase = as_int(after.get("current_phase"), 0)
     if after_phase < before_phase and source not in {"reset_plan", "dashboard_reset_plan"}:
         raise ValueError("current_phase cannot move backward without a reset path")
+    if source not in {"reset_plan", "dashboard_reset_plan"}:
+        if after_phase > before_phase + 1:
+            raise ValueError("current_phase cannot jump forward multiple phases at once")
+        if after_phase == before_phase + 1 and before_phase > 0:
+            if not _is_phase_converged(after, str(before_phase)) or _blocking_issue_count(after) != 0:
+                raise ValueError(
+                    f"phase {before_phase}->{after_phase} blocked: previous phase is not fully CONVERGED or has blocking issues"
+                )
+
+
+def _blocking_issue_count(data: dict) -> int:
+    issues = data.get("issues", [])
+    return len([i for i in issues if i.get("status") == "OPEN" and i.get("level") == "BLOCKING"])
+
+
+def _find_phase(data: dict, phase_id: str):
+    for ph in data.get("phases", []):
+        if str(ph.get("id")) == str(phase_id):
+            return ph
+    return None
+
+
+def _find_task(data: dict, phase_id: str, task_id: str):
+    phase = _find_phase(data, phase_id)
+    if not phase:
+        return None
+    for task in phase.get("tasks", []):
+        if task.get("id") == task_id:
+            return task
+    return None
+
+
+def _is_phase_converged(data: dict, phase_id: str) -> bool:
+    target_ph = _find_phase(data, phase_id)
+    if not target_ph:
+        return False
+    tasks = target_ph.get("tasks", [])
+    if not tasks:
+        return False
+    return all(t.get("status") == "CONVERGED" for t in tasks)
+
+
+def _check_invariants(data: dict, changed_keys: list[str] | None = None) -> list[str]:
+    """Validate structural integrity of `data`.
+
+    Duplicate/missing-id checks are always enforced (cheap, and the CLI already
+    prevents duplicates on add, so legacy data should never trip them).
+    Value-level checks (threshold/level/status) and the current_phase-existence
+    check are scoped to entities this write actually touched (`changed_keys`),
+    so a pre-existing legacy record elsewhere in the file (e.g. an issue with a
+    status value that predates this schema) does not block unrelated writes.
+    """
+    errors = []
+    changed = set(changed_keys) if changed_keys is not None else None
+    changed_task_refs = set()
+    changed_issue_ids = set()
+    if changed is not None:
+        for key in changed:
+            parts = key.split(".")
+            if len(parts) >= 4 and parts[0] == "phases" and parts[2] == "tasks":
+                changed_task_refs.add((parts[1], parts[3]))
+            elif len(parts) >= 2 and parts[0] == "issues":
+                changed_issue_ids.add(parts[1])
+
+    phase_ids = set()
+    phases = data.get("phases", [])
+    current_phase = str(data.get("current_phase") or "")
+
+    for ph in phases:
+        pid = str(ph.get("id") or "")
+        if not pid:
+            errors.append("phase missing id")
+            continue
+        phase_ids.add(pid)
+        seen_tasks = set()
+        for task in ph.get("tasks", []):
+            task_id = str(task.get("id") or "")
+            if not task_id:
+                errors.append(f"phase {pid} has task without id")
+                continue
+            if task_id in seen_tasks:
+                errors.append(f"duplicate task id in phase {pid}: {task_id}")
+            seen_tasks.add(task_id)
+
+            if changed is not None and (pid, task_id) not in changed_task_refs:
+                continue
+            conv = as_int(task.get("conv"), -1)
+            threshold = as_int(task.get("threshold"), 0)
+            if conv < 0:
+                errors.append(f"task {task_id} has negative conv")
+            if threshold < 1:
+                errors.append(f"task {task_id} has invalid threshold")
+
+    if phases and current_phase and (changed is None or "current_phase" in changed):
+        if current_phase not in phase_ids:
+            errors.append(f"current_phase {current_phase} does not exist in phases")
+
+    seen_issue_ids = set()
+    for issue in data.get("issues", []):
+        issue_id = str(issue.get("id") or "")
+        if not issue_id:
+            errors.append("issue missing id")
+            continue
+        if issue_id in seen_issue_ids:
+            errors.append(f"duplicate issue id: {issue_id}")
+        seen_issue_ids.add(issue_id)
+
+        if changed is not None and issue_id not in changed_issue_ids:
+            continue
+        if issue.get("level") not in {"BLOCKING", "NON_BLOCKING"}:
+            errors.append(f"issue {issue_id} has invalid level")
+        if issue.get("status") not in {"OPEN", "RESOLVED"}:
+            errors.append(f"issue {issue_id} has invalid status")
+
+    return errors
+
+
+def _state_events_path(state_json_path: str) -> str:
+    return os.path.join(os.path.dirname(state_json_path) or ".", "state_events.jsonl")
+
+
+def append_state_event(state_json_path: str, record: dict) -> None:
+    p = _state_events_path(state_json_path)
+    try:
+        os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(line)
+    except (OSError, TypeError, ValueError) as e:
+        logger.warning(f"Failed to append state event: {e}")
+
+
+def _summarize_state(data: dict) -> dict:
+    current_phase = str(data.get("current_phase") or "")
+    control = data.get("control", {}) if isinstance(data.get("control"), dict) else {}
+    return {
+        "current_phase": current_phase,
+        "state_revision": _state_revision(data),
+        "human_required": bool(control.get("human_required", False)),
+        "blocking_issues": _blocking_issue_count(data),
+        "phase_task_statuses": {
+            str(ph.get("id")): {
+                str(task.get("id")): {
+                    "status": task.get("status"),
+                    "conv": as_int(task.get("conv"), 0),
+                }
+                for task in ph.get("tasks", [])
+            }
+            for ph in data.get("phases", [])
+        },
+    }
+
+
+def _changed_keys(before: dict, after: dict) -> list[str]:
+    changed = []
+    if str(before.get("current_phase")) != str(after.get("current_phase")):
+        changed.append("current_phase")
+
+    before_control = before.get("control", {}) if isinstance(before.get("control"), dict) else {}
+    after_control = after.get("control", {}) if isinstance(after.get("control"), dict) else {}
+    for key in sorted(set(before_control) | set(after_control)):
+        if before_control.get(key) != after_control.get(key):
+            changed.append(f"control.{key}")
+
+    before_plan = before.get("plan", {}) if isinstance(before.get("plan"), dict) else {}
+    after_plan = after.get("plan", {}) if isinstance(after.get("plan"), dict) else {}
+    for key in sorted(set(before_plan) | set(after_plan)):
+        if before_plan.get(key) != after_plan.get(key):
+            changed.append(f"plan.{key}")
+
+    before_phase_map = {
+        str(ph.get("id")): {
+            str(task.get("id")): (task.get("status"), as_int(task.get("conv"), 0))
+            for task in ph.get("tasks", [])
+        }
+        for ph in before.get("phases", [])
+    }
+    after_phase_map = {
+        str(ph.get("id")): {
+            str(task.get("id")): (task.get("status"), as_int(task.get("conv"), 0))
+            for task in ph.get("tasks", [])
+        }
+        for ph in after.get("phases", [])
+    }
+    for phase_id in sorted(set(before_phase_map) | set(after_phase_map)):
+        before_tasks = before_phase_map.get(phase_id, {})
+        after_tasks = after_phase_map.get(phase_id, {})
+        for task_id in sorted(set(before_tasks) | set(after_tasks)):
+            if before_tasks.get(task_id) != after_tasks.get(task_id):
+                changed.append(f"phases.{phase_id}.tasks.{task_id}")
+
+    before_issues = {
+        str(issue.get("id")): (issue.get("status"), issue.get("level"))
+        for issue in before.get("issues", [])
+    }
+    after_issues = {
+        str(issue.get("id")): (issue.get("status"), issue.get("level"))
+        for issue in after.get("issues", [])
+    }
+    for issue_id in sorted(set(before_issues) | set(after_issues)):
+        if before_issues.get(issue_id) != after_issues.get(issue_id):
+            changed.append(f"issues.{issue_id}")
+
+    return changed
+
+
+def _cli_progress_signature(data: dict) -> str:
+    from git_utils import git_head
+
+    return f"{data.get('current_phase') or ''}|{git_head()}"
+
+
+def _record_task_progress_quota(
+    data: dict, old_status: str, new_status: str, run_id: str | None, round_no: str | None = None
+) -> None:
+    if (old_status, new_status) not in {("TODO", "DRAFTED"), ("DRAFTED", "CONVERGED")}:
+        return
+    # quota is scoped per-round (run_id+round_no). A "run" can span many rounds
+    # (loop.py loops up to max_rounds), so keying on run_id alone would allow only
+    # one task progression for the *entire* run instead of one per round.
+    if run_id and round_no:
+        quota_key = f"{run_id}#{round_no}"
+    elif run_id:
+        quota_key = run_id
+    else:
+        logger.warning("task progress quota skipped because run_id is empty")
+        return
+    control = data.setdefault("control", {})
+    last_quota_key = str(control.get("last_task_progress_run_id") or "")
+    if last_quota_key == quota_key:
+        raise ValueError("this run has already advanced one task; finish the round before progressing another task")
+    control["last_task_progress_run_id"] = quota_key
 
 
 def guarded_state_write(
@@ -302,6 +538,7 @@ def guarded_state_write(
     source: str,
     run_id: str | None = None,
     expected_revision: int | None = None,
+    dry_run: bool = False,
 ):
     state_json = _state_json_path(control)
     data = load_state_json(state_json)
@@ -320,14 +557,37 @@ def guarded_state_write(
 
     mutate(data)
     _validate_guarded_transition(before, data, source)
+    changed_keys = _changed_keys(before, data)
+    invariant_errors = _check_invariants(data, changed_keys)
+    if invariant_errors:
+        raise ValueError("invariant violated: " + "; ".join(invariant_errors))
+    if dry_run:
+        return {
+            "ok": True,
+            "conflict": False,
+            "dry_run": True,
+            "changed_keys": changed_keys,
+            "current_revision": current_revision,
+            "last_writer": data.get("last_writer") or {},
+        }
     _stamp_last_writer(data, source, run_id)
     save_state_json(state_json, data)
+    append_state_event(state_json, {
+        "ts": datetime.now().strftime("%F %T"),
+        "run_id": run_id or "",
+        "source": source,
+        "revision": data.get("state_revision"),
+        "changed_keys": changed_keys,
+        "before_summary": _summarize_state(before),
+        "after_summary": _summarize_state(data),
+    })
     render_all(state_json)
     return {
         "ok": True,
         "conflict": False,
         "current_revision": data.get("state_revision"),
         "last_writer": data.get("last_writer") or {},
+        "changed_keys": changed_keys,
     }
 
 
@@ -418,8 +678,6 @@ def append_run_finished(
     stage: str,
     human_required_code: str = "",
 ):
-    from datetime import datetime
-
     append_round_record(cfg, {
         "type": "run_finished",
         "ts": datetime.now().strftime("%F %T"),
@@ -448,8 +706,6 @@ def append_round_artifact(
     evidence_files: list[str] | None = None,
     leaf: str | None = None,
 ):
-    from datetime import datetime
-
     append_round_record(cfg, {
         "type": "round_artifact",
         "ts": datetime.now().strftime("%F %T"),
@@ -469,7 +725,6 @@ def append_round_artifact(
 
 
 def check_stop_requested(cfg: dict, log_both=None) -> bool:
-    from datetime import datetime
     p = os.path.join(cfg["runtime"]["state_dir"], "stop_requested")
     if os.path.exists(p):
         try:
@@ -503,8 +758,6 @@ def set_human_required(
     suggested_action: str = "",
     expected_revision: int | None = None,
 ):
-    from datetime import datetime
-
     def mutate(data: dict):
         control_data = data.setdefault("control", {})
         control_data["human_required"] = required
@@ -546,8 +799,6 @@ def set_plan_human_required(
     suggested_action: str = "",
     expected_revision: int | None = None,
 ):
-    from datetime import datetime
-
     def mutate(data: dict):
         plan_data = data.setdefault("plan", {})
         plan_data["human_required"] = required
@@ -604,7 +855,11 @@ def migrate_to_json(control_path: str, out_json_path: str):
             "nodes": {}
         },
         "control": {},
-        "plan": {}
+        "plan": {},
+        "stop_condition": {
+            "final_phase_pass_gte": 10,
+            "blocking_eq": 0,
+        },
     }
     
     if os.path.exists(control_path):
@@ -838,10 +1093,56 @@ def migrate_to_json(control_path: str, out_json_path: str):
 if __name__ == "__main__":
     import argparse
     import sys
-    
+
+    def load_state_or_exit(path: str):
+        try:
+            return load_state_json(path)
+        except StateFileCorruptError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    def run_guarded_write(mutate, success_message: str, *, dry_run: bool = False):
+        try:
+            result = guarded_state_write(
+                state_path,
+                mutate,
+                source="agent_cli",
+                run_id=args.run_id,
+                dry_run=dry_run,
+            )
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except StateFileCorruptError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        if not result.get("ok"):
+            print("Error: state write conflict.", file=sys.stderr)
+            sys.exit(1)
+
+        if result.get("dry_run"):
+            changes = ", ".join(result.get("changed_keys") or []) or "no changes"
+            print(f"DRY-RUN OK: {changes}")
+        else:
+            print(success_message)
+        sys.exit(0)
+
+    def legal_task_targets(old_status: str) -> tuple[str, ...]:
+        transitions = {
+            "TODO": ("TODO", "DRAFTED", "FROZEN"),
+            "DRAFTED": ("DRAFTED", "CONVERGED", "NEEDS_REVISION", "FROZEN"),
+            "NEEDS_REVISION": ("NEEDS_REVISION", "DRAFTED", "FROZEN"),
+            "FROZEN": ("FROZEN", "TODO", "DRAFTED", "NEEDS_REVISION"),
+            "CONVERGED": ("CONVERGED", "NEEDS_REVISION", "FROZEN"),
+        }
+        return transitions.get(old_status, (old_status,))
+
     parser = argparse.ArgumentParser(description="Loop Engineering State CLI Tool")
     parser.add_argument("--control", help="Path to control file")
     parser.add_argument("--state", help="Path to state file")
+    parser.add_argument("--run-id", default=os.environ.get("LOOP_RUN_ID", ""))
+    parser.add_argument("--round", default=os.environ.get("LOOP_ROUND_NO", ""))
     subparsers = parser.add_subparsers(dest="cmd", required=True)
     
     # get
@@ -852,17 +1153,20 @@ if __name__ == "__main__":
     set_p = subparsers.add_parser("set")
     set_p.add_argument("key")
     set_p.add_argument("value")
+    set_p.add_argument("--dry-run", action="store_true")
     
     # incr
     incr_p = subparsers.add_parser("incr")
     incr_p.add_argument("key")
     incr_p.add_argument("--by", type=int, default=1)
+    incr_p.add_argument("--dry-run", action="store_true")
     
     # task-status
     ts_p = subparsers.add_parser("task-status")
     ts_p.add_argument("--phase", required=True)
     ts_p.add_argument("--task", required=True)
     ts_p.add_argument("--to", required=True, choices=["TODO", "DRAFTED", "CONVERGED", "NEEDS_REVISION", "FROZEN"])
+    ts_p.add_argument("--dry-run", action="store_true")
     
     # task-conv
     tc_p = subparsers.add_parser("task-conv")
@@ -871,6 +1175,7 @@ if __name__ == "__main__":
     tc_group = tc_p.add_mutually_exclusive_group(required=True)
     tc_group.add_argument("--incr", action="store_true")
     tc_group.add_argument("--reset", action="store_true")
+    tc_p.add_argument("--dry-run", action="store_true")
     
     # task-add
     ta_p = subparsers.add_parser("task-add")
@@ -881,6 +1186,7 @@ if __name__ == "__main__":
     ta_p.add_argument("--depends", default="")
     ta_p.add_argument("--output", default="")
     ta_p.add_argument("--spec", default="")
+    ta_p.add_argument("--dry-run", action="store_true")
     
     # issue-add
     ia_p = subparsers.add_parser("issue-add")
@@ -889,11 +1195,13 @@ if __name__ == "__main__":
     ia_p.add_argument("--task", default="")
     ia_p.add_argument("--phase", default="")
     ia_p.add_argument("--title", required=True)
+    ia_p.add_argument("--dry-run", action="store_true")
     
     # issue-set-status
     is_p = subparsers.add_parser("issue-set-status")
     is_p.add_argument("--id", required=True)
     is_p.add_argument("--to", required=True, choices=["OPEN", "RESOLVED"])
+    is_p.add_argument("--dry-run", action="store_true")
     
     # node subcommand parser definitions removed
     
@@ -936,8 +1244,8 @@ if __name__ == "__main__":
         if not os.path.exists(state_path):
             print(f"Error: state file {state_path} does not exist. Run migrate first.", file=sys.stderr)
             sys.exit(1)
-            
-        data = load_state_json(state_path)
+
+        data = load_state_or_exit(state_path)
         
         if args.cmd == "get":
             val = get_val_from_json_data(data, args.key)
@@ -952,11 +1260,9 @@ if __name__ == "__main__":
             if not _is_valid_key(args.key):
                 print(f"Error: Key '{args.key}' is not in white-list.", file=sys.stderr)
                 sys.exit(1)
-            set_val_in_json_data(data, args.key, args.value)
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK {args.key}={args.value}")
-            sys.exit(0)
+            def mutate(data: dict):
+                set_val_in_json_data(data, args.key, args.value)
+            run_guarded_write(mutate, f"OK {args.key}={args.value}", dry_run=args.dry_run)
             
         elif args.cmd == "incr":
             if not _is_valid_key(args.key):
@@ -977,14 +1283,12 @@ if __name__ == "__main__":
                 
             old_val = as_int(val_str)
             new_val = old_val + args.by
-            set_val_in_json_data(data, args.key, str(new_val))
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK {args.key}={new_val}")
-            sys.exit(0)
+            def mutate(data: dict):
+                set_val_in_json_data(data, args.key, str(new_val))
+            run_guarded_write(mutate, f"OK {args.key}={new_val}", dry_run=args.dry_run)
             
     elif args.cmd in ("task-status", "task-conv", "task-add"):
-        data = load_state_json(state_path)
+        data = load_state_or_exit(state_path)
         if "phases" not in data:
             data["phases"] = []
             
@@ -1005,22 +1309,28 @@ if __name__ == "__main__":
                     print(f"Error: Task '{args.id}' already exists in phase '{args.phase}'.", file=sys.stderr)
                     sys.exit(1)
             depends = [d.strip() for d in args.depends.split(",") if d.strip()]
-            phase_ph["tasks"].append({
-                "id": args.id,
-                "order": args.order,
-                "spec_ref": args.spec,
-                "status": "TODO",
-                "conv": 0,
-                "threshold": args.threshold,
-                "depends_on": depends,
-                "verify_method": "re_derive",
-                "output": args.output,
-                "last_round": None
-            })
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK task-add {args.id}")
-            sys.exit(0)
+            def mutate(data: dict):
+                target_phase = _find_phase(data, args.phase)
+                if not target_phase:
+                    target_phase = {"id": args.phase, "name": f"Phase {args.phase}", "tasks": [], "coverage": []}
+                    data.setdefault("phases", []).append(target_phase)
+                for task in target_phase["tasks"]:
+                    if task.get("id") == args.id:
+                        raise ValueError(f"Task '{args.id}' already exists in phase '{args.phase}'.")
+                target_phase["tasks"].append({
+                    "id": args.id,
+                    "order": args.order,
+                    "spec_ref": args.spec,
+                    "status": "TODO",
+                    "conv": 0,
+                    "threshold": args.threshold,
+                    "depends_on": depends,
+                    "verify_method": "re_derive",
+                    "output": args.output,
+                    "last_round": None,
+                    "last_conv_sig": "",
+                })
+            run_guarded_write(mutate, f"OK task-add {args.id}", dry_run=args.dry_run)
             
         # task-status & task-conv
         if not phase_ph:
@@ -1057,35 +1367,61 @@ if __name__ == "__main__":
                 allowed = True
             elif old_status == "CONVERGED" and new_status in ("NEEDS_REVISION", "FROZEN"):
                 allowed = True
-                
+
             if not allowed:
-                print(f"Error: Invalid status transition from {old_status} to {new_status}.", file=sys.stderr)
+                legal_targets = ", ".join(t for t in legal_task_targets(old_status) if t != old_status)
+                print(
+                    f"Error: illegal transition {old_status}->{new_status}. {old_status} can move to: {legal_targets}.",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
-                
+
             if new_status == "CONVERGED":
                 # 加驗 conv 是否達 threshold
                 if target_task.get("conv", 0) < target_task.get("threshold", 5):
                     print(f"Error: Task conv {target_task.get('conv')} < threshold {target_task.get('threshold')}.", file=sys.stderr)
                     sys.exit(1)
-                    
-            target_task["status"] = new_status
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK task-status {args.task} to {new_status}")
-            sys.exit(0)
+
+            def mutate(data: dict):
+                live_task = _find_task(data, args.phase, args.task)
+                if not live_task:
+                    raise ValueError(f"Task '{args.task}' not found in phase '{args.phase}'.")
+                live_old_status = live_task.get("status", "TODO")
+                if new_status == "CONVERGED" and live_task.get("conv", 0) < live_task.get("threshold", 5):
+                    raise ValueError(
+                        f"Task conv {live_task.get('conv')} < threshold {live_task.get('threshold')}."
+                    )
+                _record_task_progress_quota(data, live_old_status, new_status, args.run_id, args.round)
+                live_task["status"] = new_status
+
+            run_guarded_write(mutate, f"OK task-status {args.task} to {new_status}", dry_run=args.dry_run)
             
         elif args.cmd == "task-conv":
-            if args.incr:
-                target_task["conv"] = target_task.get("conv", 0) + 1
-            elif args.reset:
-                target_task["conv"] = 0
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK task-conv {args.task} (conv={target_task['conv']})")
-            sys.exit(0)
+            def mutate(data: dict):
+                live_task = _find_task(data, args.phase, args.task)
+                if not live_task:
+                    raise ValueError(f"Task '{args.task}' not found in phase '{args.phase}'.")
+                if args.incr:
+                    sig = _cli_progress_signature(data)
+                    if sig == (live_task.get("last_conv_sig") or ""):
+                        raise ValueError(
+                            "conv unchanged: the same progress signature cannot increment twice without real progress"
+                        )
+                    live_task["conv"] = as_int(live_task.get("conv"), 0) + 1
+                    live_task["last_conv_sig"] = sig
+                elif args.reset:
+                    live_task["conv"] = 0
+                    live_task["last_conv_sig"] = ""
+
+            next_conv = (as_int(target_task.get("conv"), 0) + 1) if args.incr else 0
+            run_guarded_write(
+                mutate,
+                f"OK task-conv {args.task} (conv={next_conv})",
+                dry_run=args.dry_run,
+            )
             
     elif args.cmd in ("issue-add", "issue-set-status"):
-        data = load_state_json(state_path)
+        data = load_state_or_exit(state_path)
         if "issues" not in data:
             data["issues"] = []
             
@@ -1098,18 +1434,21 @@ if __name__ == "__main__":
                     
             # 取得當前 Round，可以從 control.review_invalid_streak 或 rounds.jsonl 推得，這裡預設填寫空
             # 或是從 control 中讀取。其實我們可以看 rounds_since_progress 等。
-            data["issues"].append({
-                "id": args.id,
-                "level": args.level,
-                "title": args.title,
-                "phase": args.phase,
-                "task": args.task,
-                "status": "OPEN",
-                "round": ""
-            })
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK issue-add {args.id}")
+            def mutate(data: dict):
+                issues = data.setdefault("issues", [])
+                for issue in issues:
+                    if issue.get("id") == args.id:
+                        raise ValueError(f"Issue '{args.id}' already exists.")
+                issues.append({
+                    "id": args.id,
+                    "level": args.level,
+                    "title": args.title,
+                    "phase": args.phase,
+                    "task": args.task,
+                    "status": "OPEN",
+                    "round": ""
+                })
+            run_guarded_write(mutate, f"OK issue-add {args.id}", dry_run=args.dry_run)
             sys.exit(0)
             
         elif args.cmd == "issue-set-status":
@@ -1121,11 +1460,14 @@ if __name__ == "__main__":
             if not target_iss:
                 print(f"Error: Issue '{args.id}' not found.", file=sys.stderr)
                 sys.exit(1)
-            target_iss["status"] = args.to
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK issue-set-status {args.id} to {args.to}")
-            sys.exit(0)
+            def mutate(data: dict):
+                issues = data.setdefault("issues", [])
+                for issue in issues:
+                    if issue.get("id") == args.id:
+                        issue["status"] = args.to
+                        return
+                raise ValueError(f"Issue '{args.id}' not found.")
+            run_guarded_write(mutate, f"OK issue-set-status {args.id} to {args.to}", dry_run=args.dry_run)
             
     # node handlers removed
             
@@ -1135,7 +1477,7 @@ if __name__ == "__main__":
 
         
     elif args.cmd == "derive":
-        data = load_state_json(state_path)
+        data = load_state_or_exit(state_path)
         expr = args.expr
         
         if expr == "blocking_issues":
@@ -1146,21 +1488,7 @@ if __name__ == "__main__":
             
         elif expr.startswith("phase-converged:"):
             phase_id = expr.split(":", 1)[1]
-            phases = data.get("phases", [])
-            target_ph = None
-            for ph in phases:
-                if str(ph.get("id")) == phase_id:
-                    target_ph = ph
-                    break
-            if not target_ph:
-                print("false")
-                sys.exit(0)
-            tasks = target_ph.get("tasks", [])
-            if not tasks:
-                print("false")
-                sys.exit(0)
-            all_conv = all(t.get("status") == "CONVERGED" for t in tasks)
-            print("true" if all_conv else "false")
+            print("true" if _is_phase_converged(data, phase_id) else "false")
             sys.exit(0)
             
         elif expr == "is-done":
@@ -1172,7 +1500,7 @@ if __name__ == "__main__":
             last_ph = phases[-1]
             last_ph_id = last_ph.get("id")
             
-            sc = {
+            sc = data.get("stop_condition") or {
                 "final_phase_pass_gte": 10,
                 "blocking_eq": 0,
             }
@@ -1180,11 +1508,8 @@ if __name__ == "__main__":
             consecutive_pass = last_ph.get("consecutive_pass", 0)
             current_phase = data.get("current_phase", "1")
             
-            issues = data.get("issues", [])
-            blocking_count = len([i for i in issues if i.get("status") == "OPEN" and i.get("level") == "BLOCKING"])
-            
-            tasks = last_ph.get("tasks", [])
-            all_conv = all(t.get("status") == "CONVERGED" for t in tasks) if tasks else False
+            blocking_count = _blocking_issue_count(data)
+            all_conv = _is_phase_converged(data, str(last_ph_id))
             
             is_completed = (
                 str(current_phase) == str(last_ph_id) and

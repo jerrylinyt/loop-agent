@@ -14,6 +14,14 @@
 {state_cli} <subcommand> [arguments...]
 ```
 
+### 1.1 乾跑驗證模式 (`--dry-run`)
+所有寫入子命令（`set`、`incr`、`task-status`、`task-conv`、`task-add`、`issue-add`、`issue-set-status`）均支援 `--dry-run` 參數。
+當帶上 `--dry-run` 時，系統會執行完整的安全性與結構不變量校驗，但**不會**實質寫入 `state.json` 檔案或產生稽核日誌：
+```bash
+{state_cli} set human_required true --dry-run
+```
+如果操作違反規則，指令依然會回傳 exit code 1 並印出錯誤原因；如果合法，會輸出 `DRY-RUN OK` 與預期變更的鍵值。
+
 ---
 
 ## 2. 通用變數更新 (`set` / `incr`)
@@ -87,7 +95,7 @@
 ### 3.3 新增任務 (用於規劃期)
 - **在某個 Phase 中新增任務**：
   ```bash
-  {state_cli} task-add --phase 1 --task TASK-03 --output "outputs/new_doc.md"
+  {state_cli} task-add --phase 1 --id TASK-03 --order 3 --output "outputs/new_doc.md"
   ```
 
 ---
@@ -98,18 +106,18 @@
 當遭遇卡死、規格衝突或需要人類決策時，需建立一個 Issue：
 - **新增一個阻礙性 (BLOCKING) Issue**：
   ```bash
-  {state_cli} issue-add --id ISSUE-01 --title "某個 API 規格衝突導致測試無法通過" --level blocking --phase 1 --task TASK-02
+  {state_cli} issue-add --id ISSUE-01 --title "某個 API 規格衝突導致測試無法通過" --level BLOCKING --phase 1 --task TASK-02
   ```
-- **新增一個資訊性 (INFO) Issue**：
+- **新增一個非阻礙性 (NON_BLOCKING) Issue**：
   ```bash
-  {state_cli} issue-add --id ISSUE-02 --title "效能優化建議" --level info
+  {state_cli} issue-add --id ISSUE-02 --title "效能優化建議" --level NON_BLOCKING
   ```
 
 ### 4.2 更新 Issue 狀態
-Issue 的狀態包括 `OPEN`、`RESOLVED`、`WONTFIX`：
+Issue 的狀態包括 `OPEN`、`RESOLVED`：
 - **解決 Issue**：
   ```bash
-  {state_cli} issue-set-status --id ISSUE-01 --status RESOLVED
+  {state_cli} issue-set-status --id ISSUE-01 --to RESOLVED
   ```
 
 ---
@@ -148,3 +156,11 @@ Issue 的狀態包括 `OPEN`、`RESOLVED`、`WONTFIX`：
 6. **唯一性檢查**：
    - 使用 `task-add` 時，Task ID 在該 Phase 內不可重複。
    - 使用 `issue-add` 時，Issue ID 全域不可重複。
+7. **一輪一任務配額限制**：
+   - 當帶有非空的 `run_id` 與 `round` 時，在同一個 round 內僅能有一次實質任務推進（從 `TODO` ➔ `DRAFTED` 或從 `DRAFTED` ➔ `CONVERGED`），重複推進其他任務將被拒絕。
+8. **收斂自增防灌水限制**：
+   - `task-conv --incr` 會綁定當前「Phase + Git Commit」組成的進展簽章，禁止在簽章未變更（無實質程式碼變更或 commit）的情況下連續執行兩次自增。
+9. **階段推進與跳級門檻**：
+   - 階段變更 `current_phase` 不得跨多個階段跳躍（如直接從 1 設為 3）。
+   - 當推進到相鄰下一階段（`before_phase + 1`）時，前一階段的所有任務必須皆已處於 `CONVERGED` 狀態，且全域 `BLOCKING` 類型之 Issue 數量必須為 0，否則會被拒絕。
+

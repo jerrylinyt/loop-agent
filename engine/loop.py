@@ -136,7 +136,8 @@ def run_git_review_gate(cfg: dict, control: str, log_both) -> tuple[bool, str, s
                         control_files=control_files_str,
                         result_file=result_file,
                         state_json_content=state_json_content,
-                        control=control)
+                        control=control,
+                        run_id=cfg.get("run_id", ""))
                              
     model = cfg.get("agent", {}).get("models", {}).get("review", "")
     if not model:
@@ -428,8 +429,6 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             pass
 
     prompts = cfg["agent"]["prompts"]
-    base_prompt = fmt_prompt(prompts.get("base", ""), control=control, framework=fw)
-    escalation_prompt = fmt_prompt(prompts.get("escalation", ""), control=control, framework=fw)
 
     state_dir = rt["state_dir"]
     os.makedirs(state_dir, exist_ok=True)
@@ -492,6 +491,12 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         stuck_level = as_int(get_val(control, "stuck_level"))
         model = select_model(cfg, "execute", stuck_level)
         tier = model_tier_label(cfg, "execute", stuck_level)
+        # Rendered per-round (not hoisted above the loop) so the embedded
+        # state_cli carries this round's number — the one-task-per-round quota
+        # (state.py _record_task_progress_quota) keys off run_id+round, and
+        # run_id alone is constant for the whole multi-round run.
+        base_prompt = fmt_prompt(prompts.get("base", ""), control=control, framework=fw, run_id=run_id, round=i)
+        escalation_prompt = fmt_prompt(prompts.get("escalation", ""), control=control, framework=fw, run_id=run_id, round=i)
         prompt = (_pending_revert_notice + "\n" if _pending_revert_notice else "") \
                  + base_prompt + ("\n" + escalation_prompt if stuck_level >= 1 else "")
         _pending_revert_notice = ""
