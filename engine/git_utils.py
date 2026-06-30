@@ -42,6 +42,17 @@ def git_head() -> str:
         return ""
 
 
+def changed_files_between(before: str, after: str) -> list[str]:
+    if not before or not after or before == after or not in_git_repo():
+        return []
+    try:
+        r = subprocess.run(["git", "diff", "--name-only", before, after], capture_output=True, text=True)
+        return sorted([x for x in r.stdout.strip().splitlines() if x])
+    except OSError as e:
+        logger.warning(f"Failed to get changed files between {before} and {after}: {e}")
+        return []
+
+
 def expand_control_files(cfg: dict) -> list[str]:
     files = []
     for pat in cfg.get("control_files", []):

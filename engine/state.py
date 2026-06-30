@@ -45,11 +45,17 @@ def save_state_json(state_json_path: str, data: dict):
 # ─────────────── key 映射白名單與校驗 ───────────────
 
 STATIC_KEYS = {
+    "state_revision", "last_writer_run_id", "last_writer_source", "last_writer_ts",
     "current_phase", "plan_version", "framework_ref", "last_round_mode", "last_round_result",
     "last_round_fail_tasks", "rounds_since_progress", "stuck_level", "current_model_tier",
-    "enhanced_rounds_used", "human_required", "human_required_reason", "human_required_msg",
+    "enhanced_rounds_used", "human_required", "human_required_code", "human_required_reason",
+    "human_required_msg", "human_required_since", "suggested_human_action",
+    "human_required_source", "human_required_run_id",
     "review_invalid_streak", "last_safe_sha", "stop_condition_met", "blocking_issues",
-    "tree_enabled", "tree_root", "tree_total_nodes", "tree_total_leaves", "tree_max_depth"
+    "tree_enabled", "tree_root", "tree_total_nodes", "tree_total_leaves", "tree_max_depth",
+    "plan_human_required", "plan_human_required_code", "plan_human_required_reason",
+    "plan_human_required_msg", "plan_human_required_since", "plan_suggested_human_action",
+    "plan_human_required_source", "plan_human_required_run_id"
 }
 
 
@@ -70,10 +76,23 @@ def _is_valid_key(key: str) -> bool:
 
 def get_val_from_json_data(data: dict, key: str) -> str | None:
     # 1. Root 欄位
-    root_keys = {"schema_version", "mode", "current_phase", "plan_version", "framework_ref"}
+    root_keys = {
+        "schema_version", "mode", "current_phase", "plan_version", "framework_ref",
+        "state_revision"
+    }
     if key in root_keys:
         val = data.get(key)
         return str(val) if val is not None else None
+
+    if key == "last_writer_run_id":
+        val = data.get("last_writer", {}).get("run_id")
+        return str(val) if val is not None else ""
+    if key == "last_writer_source":
+        val = data.get("last_writer", {}).get("source")
+        return str(val) if val is not None else ""
+    if key == "last_writer_ts":
+        val = data.get("last_writer", {}).get("ts")
+        return str(val) if val is not None else ""
 
     # 2. tree_enabled
     if key == "tree_enabled":
@@ -130,8 +149,10 @@ def get_val_from_json_data(data: dict, key: str) -> str | None:
     control_keys = {
         "last_round_mode", "last_round_result", "last_round_fail_tasks",
         "rounds_since_progress", "stuck_level", "current_model_tier",
-        "enhanced_rounds_used", "human_required", "human_required_reason",
-        "human_required_msg", "review_invalid_streak", "last_safe_sha",
+        "enhanced_rounds_used", "human_required", "human_required_code",
+        "human_required_reason", "human_required_msg", "human_required_since",
+        "suggested_human_action", "human_required_source", "human_required_run_id",
+        "review_invalid_streak", "last_safe_sha",
         "stop_condition_met"
     }
     if key in control_keys:
@@ -162,11 +183,20 @@ def set_val_in_json_data(data: dict, key: str, value: str):
             return 0
 
     # 1. Root 欄位
-    if key in {"schema_version", "mode", "current_phase", "plan_version", "framework_ref"}:
+    if key in {"schema_version", "mode", "current_phase", "plan_version", "framework_ref", "state_revision"}:
         if key in ("schema_version", "plan_version"):
+            data[key] = to_int(value)
+        elif key == "state_revision":
             data[key] = to_int(value)
         else:
             data[key] = value
+        return
+
+    if key in {"last_writer_run_id", "last_writer_source", "last_writer_ts"}:
+        if "last_writer" not in data or not isinstance(data["last_writer"], dict):
+            data["last_writer"] = {}
+        field = key.replace("last_writer_", "")
+        data["last_writer"][field] = value
         return
 
     # 2. tree_enabled
@@ -232,8 +262,10 @@ def set_val_in_json_data(data: dict, key: str, value: str):
     control_keys = {
         "last_round_mode", "last_round_result", "last_round_fail_tasks",
         "rounds_since_progress", "stuck_level", "current_model_tier",
-        "enhanced_rounds_used", "human_required", "human_required_reason",
-        "human_required_msg", "review_invalid_streak", "last_safe_sha",
+        "enhanced_rounds_used", "human_required", "human_required_code",
+        "human_required_reason", "human_required_msg", "human_required_since",
+        "suggested_human_action", "human_required_source", "human_required_run_id",
+        "review_invalid_streak", "last_safe_sha",
         "stop_condition_met", "blocking_issues"
     }
     if key in control_keys:
@@ -284,6 +316,83 @@ def set_val(control: str, key: str, value: str):
     set_val_in_json_data(data, key, value)
     save_state_json(state_json, data)
     render_all(state_json)
+
+
+def _state_revision(data: dict) -> int:
+    try:
+        return int(data.get("state_revision") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _stamp_last_writer(data: dict, source: str, run_id: str | None):
+    from datetime import datetime
+
+    data["schema_version"] = max(as_int(data.get("schema_version"), 1), 2)
+    data["state_revision"] = _state_revision(data) + 1
+    data["last_writer"] = {
+        "run_id": run_id or "",
+        "source": source,
+        "ts": datetime.now().strftime("%F %T"),
+    }
+
+
+def _validate_guarded_transition(before: dict, after: dict, source: str):
+    before_control = before.get("control", {}) if isinstance(before.get("control"), dict) else {}
+    after_control = after.get("control", {}) if isinstance(after.get("control"), dict) else {}
+    before_plan = before.get("plan", {}) if isinstance(before.get("plan"), dict) else {}
+    after_plan = after.get("plan", {}) if isinstance(after.get("plan"), dict) else {}
+
+    before_human = bool(before_control.get("human_required", False))
+    after_human = bool(after_control.get("human_required", False))
+    if before_human and not after_human and source not in {"dashboard_resume", "dashboard_clear_human_required", "resume"}:
+        raise ValueError("human_required can only be cleared by an explicit resume action")
+
+    before_plan_human = bool(before_plan.get("human_required", False))
+    after_plan_human = bool(after_plan.get("human_required", False))
+    if before_plan_human and not after_plan_human and source not in {"dashboard_resume", "dashboard_clear_human_required", "resume"}:
+        raise ValueError("plan_human_required can only be cleared by an explicit resume action")
+
+    before_phase = as_int(before.get("current_phase"), 0)
+    after_phase = as_int(after.get("current_phase"), 0)
+    if after_phase < before_phase and source not in {"reset_plan", "dashboard_reset_plan"}:
+        raise ValueError("current_phase cannot move backward without a reset path")
+
+
+def guarded_state_write(
+    control: str,
+    mutate,
+    *,
+    source: str,
+    run_id: str | None = None,
+    expected_revision: int | None = None,
+):
+    state_json = _state_json_path(control)
+    data = load_state_json(state_json)
+    if not isinstance(data, dict):
+        data = {}
+
+    before = json.loads(json.dumps(data))
+    current_revision = _state_revision(data)
+    if expected_revision is not None and current_revision != expected_revision:
+        return {
+            "ok": False,
+            "conflict": True,
+            "current_revision": current_revision,
+            "last_writer": data.get("last_writer") or {},
+        }
+
+    mutate(data)
+    _validate_guarded_transition(before, data, source)
+    _stamp_last_writer(data, source, run_id)
+    save_state_json(state_json, data)
+    render_all(state_json)
+    return {
+        "ok": True,
+        "conflict": False,
+        "current_revision": data.get("state_revision"),
+        "last_writer": data.get("last_writer") or {},
+    }
 
 
 def as_int(v, d=0) -> int:
@@ -365,6 +474,64 @@ def append_round_record(cfg: dict, record: dict) -> None:
         logger.warning(f"Failed to append round record: {e}")
 
 
+def append_run_finished(
+    cfg: dict,
+    *,
+    final_status: str,
+    exit_code: int,
+    stage: str,
+    human_required_code: str = "",
+):
+    from datetime import datetime
+
+    append_round_record(cfg, {
+        "type": "run_finished",
+        "ts": datetime.now().strftime("%F %T"),
+        "run_id": cfg.get("run_id"),
+        "workspace": cfg.get("_workspace") or "default",
+        "mode": (cfg.get("generation") or {}).get("mode", "gated"),
+        "stage": stage,
+        "ended_at": datetime.now().strftime("%F %T"),
+        "exit_code": exit_code,
+        "final_status": final_status,
+        "human_required_code": human_required_code,
+    })
+
+
+def append_round_artifact(
+    cfg: dict,
+    *,
+    round_no: int,
+    loop_type: str,
+    phase: str,
+    changed_files: list[str],
+    git_head_before: str,
+    git_head_after: str,
+    validation_summary: str,
+    validation_status: str,
+    evidence_files: list[str] | None = None,
+    leaf: str | None = None,
+):
+    from datetime import datetime
+
+    append_round_record(cfg, {
+        "type": "round_artifact",
+        "ts": datetime.now().strftime("%F %T"),
+        "run_id": cfg.get("run_id"),
+        "round": round_no,
+        "loop_type": loop_type,
+        "phase": phase,
+        "leaf": leaf,
+        "changed_files": changed_files,
+        "git_head_before": git_head_before,
+        "git_head_after": git_head_after,
+        "commit": git_head_after,
+        "validation_summary": validation_summary,
+        "validation_status": validation_status,
+        "evidence_files": evidence_files or [],
+    })
+
+
 def check_stop_requested(cfg: dict, log_both=None) -> bool:
     from datetime import datetime
     p = os.path.join(cfg["runtime"]["state_dir"], "stop_requested")
@@ -389,26 +556,90 @@ def check_stop_requested(cfg: dict, log_both=None) -> bool:
     return False
 
 
-def set_human_required(control: str, required: bool, reason: str = "", msg: str = ""):
-    if required:
-        set_val(control, "human_required", "true")
-        set_val(control, "human_required_reason", reason)
-        set_val(control, "human_required_msg", msg)
-    else:
-        set_val(control, "human_required", "false")
-        set_val(control, "human_required_reason", "")
-        set_val(control, "human_required_msg", "")
+def set_human_required(
+    control: str,
+    required: bool,
+    reason: str = "",
+    msg: str = "",
+    *,
+    run_id: str | None = None,
+    source: str = "execute_loop",
+    suggested_action: str = "",
+    expected_revision: int | None = None,
+):
+    from datetime import datetime
+
+    def mutate(data: dict):
+        control_data = data.setdefault("control", {})
+        control_data["human_required"] = required
+        if required:
+            control_data["human_required_code"] = reason
+            control_data["human_required_reason"] = msg
+            control_data["human_required_msg"] = msg
+            control_data["human_required_since"] = datetime.now().strftime("%F %T")
+            control_data["suggested_human_action"] = suggested_action
+            control_data["human_required_source"] = source
+            control_data["human_required_run_id"] = run_id or ""
+        else:
+            control_data["human_required"] = False
+            control_data["human_required_code"] = ""
+            control_data["human_required_reason"] = ""
+            control_data["human_required_msg"] = ""
+            control_data["human_required_since"] = ""
+            control_data["suggested_human_action"] = ""
+            control_data["human_required_source"] = ""
+            control_data["human_required_run_id"] = ""
+
+    return guarded_state_write(
+        control,
+        mutate,
+        source=source,
+        run_id=run_id,
+        expected_revision=expected_revision,
+    )
 
 
-def set_plan_human_required(control: str, required: bool, reason: str = "", msg: str = ""):
-    if required:
-        set_val(control, "plan_human_required", "true")
-        set_val(control, "plan_human_required_reason", reason)
-        set_val(control, "plan_human_required_msg", msg)
-    else:
-        set_val(control, "plan_human_required", "false")
-        set_val(control, "plan_human_required_reason", "")
-        set_val(control, "plan_human_required_msg", "")
+def set_plan_human_required(
+    control: str,
+    required: bool,
+    reason: str = "",
+    msg: str = "",
+    *,
+    run_id: str | None = None,
+    source: str = "plan_loop",
+    suggested_action: str = "",
+    expected_revision: int | None = None,
+):
+    from datetime import datetime
+
+    def mutate(data: dict):
+        plan_data = data.setdefault("plan", {})
+        plan_data["human_required"] = required
+        if required:
+            plan_data["human_required_code"] = reason
+            plan_data["human_required_reason"] = msg
+            plan_data["human_required_msg"] = msg
+            plan_data["human_required_since"] = datetime.now().strftime("%F %T")
+            plan_data["suggested_human_action"] = suggested_action
+            plan_data["human_required_source"] = source
+            plan_data["human_required_run_id"] = run_id or ""
+        else:
+            plan_data["human_required"] = False
+            plan_data["human_required_code"] = ""
+            plan_data["human_required_reason"] = ""
+            plan_data["human_required_msg"] = ""
+            plan_data["human_required_since"] = ""
+            plan_data["suggested_human_action"] = ""
+            plan_data["human_required_source"] = ""
+            plan_data["human_required_run_id"] = ""
+
+    return guarded_state_write(
+        control,
+        mutate,
+        source=source,
+        run_id=run_id,
+        expected_revision=expected_revision,
+    )
 
 
 # ─────────────── 一次性 Migration 工具 ───────────────

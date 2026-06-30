@@ -1,36 +1,44 @@
-# Feature 11: Engine Run Sessions
+# Feature 11: Structured Run Sessions
 
 ## Type
 
-
-> Current direction: do not create a separate event/artifact JSONL file. Emit typed records into `.loop_state/rounds.jsonl` and use `type` to distinguish lifecycle events, completed rounds, and artifact-bearing records.
-
-Engine additive observability.
+Engine additive observability and control traceability.
 
 ## Goal
 
-Record each Start/run invocation as a distinct session with metadata and final outcome.
+Record each Start/run invocation as a distinct session with metadata and final outcome so later state changes can be attributed to a specific run.
 
 ## Problem
 
-`run.lock` and `rounds.jsonl` show activity, but they do not provide a clean historical boundary for "this run". Dashboard users need run history and final summaries.
+`run_id` already exists during loop execution and typed records already land in `.loop_state/rounds.jsonl`, but the session contract is still implicit. Dashboard and future state guards need a clean way to answer:
 
-## Proposed Artifacts
+- when did this run start and end
+- which mode and stage owned it
+- what final status did it produce
+- which run last set `human_required`
 
-```text
-<repo>/.loop/<ws>/.loop_state/runs/<run_id>/manifest.json
-<repo>/.loop/<ws>/.loop_state/runs/<run_id>/events.jsonl
-```
+## Proposed Record Shape
 
-Manifest example:
+Do not add a parallel `events.jsonl`. Keep `.loop_state/rounds.jsonl` as the canonical append-only log and add typed lifecycle records.
+
+Example records:
 
 ```json
 {
+  "type": "run_started",
   "run_id": "default:20260628-230100",
   "workspace": "default",
   "mode": "auto",
   "stage": "all",
-  "started_at": "2026-06-28 23:01:00",
+  "started_at": "2026-06-28 23:01:00"
+}
+```
+
+```json
+{
+  "type": "run_finished",
+  "run_id": "default:20260628-230100",
+  "workspace": "default",
   "ended_at": "2026-06-28 23:35:00",
   "exit_code": 0,
   "final_status": "complete",
@@ -41,23 +49,22 @@ Manifest example:
 
 ## Implementation Plan
 
-1. Generate a `run_id` at engine entry.
-2. Store `run_id` in memory and pass to plan/execute helpers where practical.
-3. Create a manifest at run start.
-4. Update manifest at run finish, max rounds, human required, or exception path.
-5. Optionally copy or link events into the run folder.
-6. Keep existing `rounds.jsonl` for compatibility.
+1. Standardize `run_started` and `run_finished` typed records for both `plan_loop.py` and `loop.py`.
+2. Ensure every terminal path writes `run_finished` best-effort, including success, preflight failure, hard stop, and exception paths.
+3. Include fields needed by later control guards: `run_id`, `workspace`, `mode`, `stage`, `started_at`, `ended_at`, `exit_code`, `final_status`, and `human_required_code`.
+4. Add a helper that reconstructs recent sessions from `rounds.jsonl` instead of creating a second source of truth.
+5. Keep writes best-effort so observability failures do not break loop execution.
 
 ## Acceptance Criteria
 
-- Every run creates a manifest.
-- Manifest is updated on normal completion and common stop paths.
-- Missing manifest update must not break loop execution.
-- Dashboard can list recent runs later.
+- Every run writes one `run_started` record and one `run_finished` record where process shutdown allows it.
+- Terminal records cover normal completion and common stop paths.
+- Missing lifecycle record writes must not break loop execution.
+- Dashboard can list recent runs by reconstructing sessions from `rounds.jsonl`.
+- The latest `run_id` responsible for a stop can be identified reliably.
 
 ## Tests
 
-- Unit test manifest create/update helpers.
+- Unit test lifecycle record helper functions.
 - Integration test for a minimal run.
-- Verify interrupted/failed run still leaves a useful manifest where possible.
-
+- Verify interrupted or failed runs still leave useful session data where possible.

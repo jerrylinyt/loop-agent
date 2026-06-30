@@ -15,8 +15,8 @@ import logging
 from datetime import datetime
 
 from config import load_config, fmt_prompt, select_model, model_tier_label
-from git_utils import in_git_repo, changed_files, git_guard
-from state import get_val, set_val, as_int, append_round_record, check_stop_requested, set_plan_human_required
+from git_utils import in_git_repo, changed_files, changed_files_between, git_guard, git_head
+from state import get_val, set_val, as_int, append_round_record, append_round_artifact, append_run_finished, check_stop_requested, set_plan_human_required
 from agent_runner import build_cmd, run_agent
 from tree import (
     tree_enabled, tree_md_path, seed_tree,
@@ -137,6 +137,8 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
     ws_name = cfg["workspace"]
     start_epoch = int(time.time())
     run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
+    cfg["run_id"] = run_id
+    cfg["run_id"] = run_id
 
     gen = cfg.get("generation") or {}
     threshold = gen.get("plan_converge_threshold", 2)
@@ -161,8 +163,22 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
         except OSError:
             pass
 
+    append_round_record(cfg, {
+        "run_id": run_id,
+        "ts": datetime.now().strftime("%F %T"),
+        "type": "run_started",
+        "workspace": ws_name,
+        "mode": mode,
+        "stage": "plan",
+        "started_at": datetime.now().strftime("%F %T"),
+    })
+
+    def finish(status: str, code: int, human_code: str = "") -> int:
+        append_run_finished(cfg, final_status=status, exit_code=code, stage="plan", human_required_code=human_code)
+        return code
+
     if not report_preflight(cfg, "plan", log_both):
-        return 1
+        return finish("preflight_failed", 1)
 
     plan_md = plan_md_path(cfg)
     if seed_plan(plan_md):
@@ -176,7 +192,7 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
 
     for i in range(1, max_rounds + 1):
         if check_stop_requested(cfg, log_both):
-            return 1
+            return finish("stopped", 1)
         rotate_log_if_needed(cfg)
         if lock_path:
             touch_run_lock(lock_path)
@@ -185,7 +201,7 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
             break
         if get_val(plan_md, "plan_human_required") == "true":
             log_both("🧑‍⚖️ plan_human_required=true：已停下交人類裁決規劃書，loop 停止。")
-            return 2
+            return finish("human_required", 2, get_val(plan_md, "plan_human_required_code") or "")
 
         plan_stuck = as_int(get_val(plan_md, "plan_stuck_level"))
         gen_model = select_model(cfg, "decompose", plan_stuck)
@@ -195,6 +211,8 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
         hb(f"▶ Plan Cycle {i} · Round A 生成 開始 ({ts})  模型階層={tier}")
         log_both(f"\n════════════ Plan Cycle {i} · Round A 生成 ({ts}) tier={tier} ════════════")
         cmd = build_cmd(cfg, gen_model, build_gen_prompt(cfg, fw, plan_md, req))
+        git_head_before = git_head()
+        git_head_before = git_head()
         rc, killed = run_agent(cmd, cfg)
         if killed:
             append_round_record(cfg, {
@@ -266,11 +284,11 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
             set_val(plan_md, "plan_model_tier", upgraded_tier)
             log_both(f"  ⬆ 規劃書連續 {rounds_since} 個 cycle 無進展 → 升級模型（{upgraded_tier}）。")
         elif plan_stuck >= 1 and rounds_since >= osc["stall_threshold"] + osc["enhanced_max_rounds"]:
-            set_plan_human_required(plan_md, True, "plan_stuck_threshold_exceeded", f"規劃書連續 {rounds_since} 個 cycle 無進展，且已嘗試增強模型，停止交人。")
+            set_plan_human_required(plan_md, True, "plan_not_converging", f"規劃書連續 {rounds_since} 個 cycle 無進展，且已嘗試增強模型，停止交人。", run_id=run_id, source="plan_loop", suggested_action="檢查 PLAN.md、需求與 logs 後再重新規劃。")
             set_val(plan_md, "plan_status", "stuck_human")
             log_both(f"  ⛔ 升級模型仍無進展 → 規劃書交人類裁決,停止。")
             set_val(plan_md, "plan_rounds_since_progress", str(rounds_since))
-            return 2
+            return finish("human_required", 2, "plan_not_converging")
 
         set_val(plan_md, "plan_stable_rounds", str(stable_rounds))
         set_val(plan_md, "plan_rounds_since_progress", str(rounds_since))
@@ -294,6 +312,19 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
             "progressed": stable,
             "model_tier": tier,
         })
+        current_head = git_head()
+        append_round_artifact(
+            cfg,
+            round_no=i,
+            loop_type="plan",
+            phase="plan",
+            changed_files=changed_files_between(git_head_before, current_head),
+            git_head_before=git_head_before,
+            git_head_after=current_head,
+            validation_summary=f"plan gate -> {gate or 'NA'}",
+            validation_status=str(gate or "NA").lower(),
+            evidence_files=[],
+        )
 
         if stable_rounds >= threshold:
             set_val(plan_md, "plan_status", "converged")
@@ -303,8 +334,8 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
 
     if get_val(plan_md, "plan_status") not in ("converged",):
         log_both(f"⛔ 規劃書未在 {max_rounds} 個 cycle 內收斂,請人工檢視 {plan_md} 與 .loop/。")
-        set_plan_human_required(plan_md, True, "max_rounds_reached", f"規劃書未在 {max_rounds} 個 cycle 內收斂，達到硬性上限")
-        return 2
+        set_plan_human_required(plan_md, True, "max_rounds_reached", f"規劃書未在 {max_rounds} 個 cycle 內收斂，達到硬性上限", run_id=run_id, source="plan_loop", suggested_action="檢查 PLAN.md、需求與 logs 後再重新規劃。")
+        return finish("human_required", 2, "max_rounds_reached")
 
     loop_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
     if mode == "auto":
@@ -315,7 +346,7 @@ def _run_plan_locked(cfg, mode_override, lock_path=None):
         hb("\n🧑 mode=gated:規劃書已收斂,停下交人類 review。")
         hb("   review .loop/{loop.config.yaml, CONTROL.md, phases/} 後,執行:")
         hb(f"   python {loop_py}")
-    return 0
+    return finish("complete", 0)
 
 
 # ─────────────── 樹模式：漸進拆解迴圈 ───────────────
@@ -374,8 +405,22 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
         except OSError:
             pass
 
+    append_round_record(cfg, {
+        "run_id": run_id,
+        "ts": datetime.now().strftime("%F %T"),
+        "type": "run_started",
+        "workspace": ws_name,
+        "mode": mode,
+        "stage": "plan",
+        "started_at": datetime.now().strftime("%F %T"),
+    })
+
+    def finish(status: str, code: int, human_code: str = "") -> int:
+        append_run_finished(cfg, final_status=status, exit_code=code, stage="plan", human_required_code=human_code)
+        return code
+
     if not report_preflight(cfg, "plan", log_both):
-        return 1
+        return finish("preflight_failed", 1)
 
     tree_path = tree_md_path(cfg)
     req = os.path.join(os.path.dirname(cfg["control"]) or ".", "REQUIREMENTS.md")
@@ -394,14 +439,14 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
     plan_md = plan_md_path(cfg)
     for i in range(1, max_rounds + 1):
         if check_stop_requested(cfg, log_both):
-            return 1
+            return finish("stopped", 1)
         rotate_log_if_needed(cfg)
         if lock_path:
             touch_run_lock(lock_path)
         sync_framework_docs(cfg, log_both)
         if get_val(plan_md, "plan_human_required") == "true":
             log_both("🧑‍⚖️ plan_human_required=true：已停下交人類裁決規劃書，loop 停止。")
-            return 2
+            return finish("human_required", 2, "plan_not_converging")
 
         # ── 選目標節點 ──
         target = next_pending_node(tree_path)
@@ -431,7 +476,7 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
                              f"（建議人類 gate 時特別檢視）")
                 break
             log_both("⚠️ 無 PENDING 節點但樹未完成（異常狀態），停止。")
-            return 1
+            return finish("stopped", 1)
 
         # 換了目標節點 → 重置 per-node 卡住計數
         if target != current_target:
@@ -537,16 +582,16 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
             if depth_violations:
                 log_both(f"  ⛔ 拆解深度超限（max_depth={brk_max_depth}）→ 凍結交人。"
                          f" 超標節點：{', '.join(depth_violations)}")
-                set_plan_human_required(plan_md, True, "tree_depth_limit_exceeded", f"拆解深度超限（max_depth={brk_max_depth}）。超標節點：{', '.join(depth_violations)}")
-                return 2
+                set_plan_human_required(plan_md, True, "tree_structure_error", f"拆解深度超限（max_depth={brk_max_depth}）。超標節點：{', '.join(depth_violations)}", run_id=run_id, source="plan_loop", suggested_action="先調整樹分解策略與限制，再重新規劃。")
+                return finish("human_required", 2, "tree_structure_error")
 
             # ── 硬 BREAKER：max_leaves（Chunk 7）──
             # 刻意設大——明顯壞掉才觸發的跳閘，非壓樹目標
             leaf_count_total, exceeded = check_leaves_breaker(tree_path, brk_max_leaves)
             if exceeded:
                 log_both(f"  ⛔ 葉子總數超限（{leaf_count_total} > max_leaves={brk_max_leaves}）→ 凍結交人。")
-                set_plan_human_required(plan_md, True, "tree_leaves_limit_exceeded", f"葉子總數超限（{leaf_count_total} > max_leaves={brk_max_leaves}）")
-                return 2
+                set_plan_human_required(plan_md, True, "tree_structure_error", f"葉子總數超限（{leaf_count_total} > max_leaves={brk_max_leaves}）", run_id=run_id, source="plan_loop", suggested_action="先調整樹分解策略與限制，再重新規劃。")
+                return finish("human_required", 2, "tree_structure_error")
 
             # 生長停滯歸零（有節點成功拆解 = 有進展）
             growth_stall_count = 0
@@ -563,8 +608,8 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
             log_both(f"  ⬆ 節點 [{target}] 連續 {rounds_since_progress} cycle 無進展 → 升級模型（{upgraded_tier}）。")
         elif node_stuck_level >= 1 and rounds_since_progress >= osc["stall_threshold"] + osc["enhanced_max_rounds"]:
             log_both(f"  ⛔ 節點 [{target}] 升級模型仍無進展 → 交人類裁決。")
-            set_plan_human_required(plan_md, True, "node_stuck_threshold_exceeded", f"節點 [{target}] 升級模型仍無進展")
-            return 2
+            set_plan_human_required(plan_md, True, "plan_not_converging", f"節點 [{target}] 升級模型仍無進展", run_id=run_id, source="plan_loop", suggested_action="檢查該節點需求與拆解策略後再重新規劃。")
+            return finish("human_required", 2, "plan_not_converging")
 
         # ── 硬 BREAKER：growth_stall_rounds（Chunk 7）──
         # 全樹級偵測：連續 N 個 cycle 沒有任何節點從 PENDING → DECOMPOSED/LEAF
@@ -577,8 +622,8 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
         if growth_stall_count >= brk_growth_stall:
             log_both(f"  ⛔ 樹生長停滯（連續 {growth_stall_count} cycle 無拆解進展，"
                      f"growth_stall_rounds={brk_growth_stall}）→ 凍結交人。")
-            set_plan_human_required(plan_md, True, "tree_growth_stalled", f"樹生長停滯（連續 {growth_stall_count} cycle 無拆解進展）")
-            return 2
+            set_plan_human_required(plan_md, True, "tree_growth_stalled", f"樹生長停滯（連續 {growth_stall_count} cycle 無拆解進展）", run_id=run_id, source="plan_loop", suggested_action="檢查樹分解策略與需求缺口後再重新規劃。")
+            return finish("human_required", 2, "tree_growth_stalled")
 
         append_round_record(cfg, {
             "run_id": run_id,
@@ -599,14 +644,28 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
             "progressed": stable,
             "model_tier": tier,
         })
+        current_head = git_head()
+        append_round_artifact(
+            cfg,
+            round_no=i,
+            loop_type="plan",
+            phase="plan",
+            changed_files=changed_files_between(git_head_before, current_head),
+            git_head_before=git_head_before,
+            git_head_after=current_head,
+            validation_summary=f"tree gate -> {gate or 'NA'}",
+            validation_status=str(gate or "NA").lower(),
+            evidence_files=[],
+            leaf=target,
+        )
 
         time.sleep(interval)
 
     # ── 完成後的出口 ──
     if not tree_planning_complete(tree_path):
         log_both(f"⛔ 樹規劃未在 {max_rounds} cycle 內完成，請人工檢視。")
-        set_plan_human_required(plan_md, True, "max_rounds_reached", f"樹規劃未在 {max_rounds} cycle 內完成")
-        return 2
+        set_plan_human_required(plan_md, True, "max_rounds_reached", f"樹規劃未在 {max_rounds} cycle 內完成", run_id=run_id, source="plan_loop", suggested_action="檢查樹規劃與需求缺口後再重新規劃。")
+        return finish("human_required", 2, "max_rounds_reached")
 
     loop_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
     if mode == "auto":
@@ -624,7 +683,7 @@ def _run_tree_plan_locked(cfg, mode_override, lock_path=None):
         ws_flag = f" --workspace {ws}" if ws != "default" else ""
         run_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run.py")
         hb(f"   ❌ 局部重拆 → python {run_py} --stage reject --subtree <node_id>{ws_flag}")
-    return 0
+    return finish("complete", 0)
 
 
 if __name__ == "__main__":

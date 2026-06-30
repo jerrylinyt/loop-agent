@@ -212,6 +212,123 @@ def report_preflight(cfg: dict, stage: str, emit) -> bool:
     return not errors
 
 
+def structured_preflight(
+    cfg: dict,
+    stage: str,
+    *,
+    repo_path: str | None = None,
+    workspace: str | None = None,
+    is_running: bool | None = None,
+    stale_lock: bool | None = None,
+) -> dict:
+    import shlex
+
+    repo_path = os.path.abspath(repo_path or os.getcwd())
+    control_path = cfg.get("control", "")
+    loop_dir = os.path.dirname(control_path) or "."
+    req_path = os.path.join(loop_dir, "REQUIREMENTS.md")
+    checks = []
+
+    def add_check(check_id: str, label: str, ok: bool, severity: str, detail: str):
+        checks.append({
+            "id": check_id,
+            "label": label,
+            "ok": ok,
+            "severity": severity,
+            "detail": detail,
+        })
+
+    fw = os.path.expanduser(cfg.get("framework_path", ""))
+    fw_ok = bool(fw) and os.path.isdir(fw)
+    add_check("framework_path", "Framework path exists", fw_ok, "error", fw or "missing")
+    add_check(
+        "framework_boot_sequence",
+        "Framework boot sequence exists",
+        os.path.isfile(os.path.join(fw, "rules", "boot-sequence.md")) if fw_ok else False,
+        "warning",
+        os.path.join(fw, "rules", "boot-sequence.md") if fw_ok else "framework path missing",
+    )
+
+    agent = cfg.get("agent", {})
+    models = agent.get("models", {})
+    for key in ("fast", "normal", "thinking"):
+        add_check(
+            f"agent_model_{key}",
+            f"Agent {key} model configured",
+            not _is_placeholder(models.get(key)),
+            "error",
+            str(models.get(key) or "missing"),
+        )
+
+    prompts = agent.get("prompts", {}) or {}
+    missing_prompts = [
+        key for key in ("base", "escalation", "git_review", "plan", "plan_gate", "tree_decompose", "tree_decompose_gate")
+        if not str(prompts.get(key) or "").strip()
+    ]
+    add_check("agent_prompts", "Agent prompts configured", not missing_prompts, "error", ", ".join(missing_prompts) if missing_prompts else "ready")
+
+    build_cmd = agent.get("build_cmd") or ""
+    exe = shlex.split(build_cmd)[0] if build_cmd.strip() else ""
+    build_ok = bool(build_cmd.strip()) and (not exe or exe.startswith("{") or shutil.which(exe) is not None)
+    add_check("build_cmd", "Build command is usable", build_ok, "warning", build_cmd or "missing")
+
+    git_repo = subprocess.run(["git", "-C", repo_path, "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True)
+    in_repo_ok = git_repo.returncode == 0 and git_repo.stdout.strip() == "true"
+    add_check("git_repo", "Git repository is available", in_repo_ok, "warning", repo_path)
+
+    git_email = ""
+    git_identity_ok = False
+    if in_repo_ok:
+        email = subprocess.run(["git", "-C", repo_path, "config", "user.email"], capture_output=True, text=True)
+        git_email = email.stdout.strip()
+        git_identity_ok = bool(git_email)
+    add_check("git_identity", "Git identity is configured", git_identity_ok, "warning", git_email or "missing user.email")
+
+    phases = cfg.get("phases") or []
+    add_check("phases_present", "Phases configured", bool(phases), "error" if stage == "execute" else "warning", str(len(phases)))
+
+    placeholder_phases = []
+    for ph in phases:
+        threshold = ph.get("converge_threshold")
+        if threshold is not None and _is_placeholder(threshold):
+            placeholder_phases.append(str(ph.get("id", "?")))
+    add_check("phase_thresholds", "Phase thresholds are concrete", not placeholder_phases, "warning", ", ".join(placeholder_phases) if placeholder_phases else "ready")
+
+    add_check("requirements_present", "Requirements file exists", os.path.exists(req_path), "warning" if stage == "plan" else "info", req_path)
+    req_confirmed = False
+    if os.path.exists(req_path):
+        with open(req_path, "r", encoding="utf-8") as f:
+            req_confirmed = "REQUIREMENTS CONFIRMED" in f.read()
+    add_check("requirements_confirmed", "Requirements confirmed", req_confirmed, "warning", "marker present" if req_confirmed else "REQUIREMENTS CONFIRMED marker missing")
+
+    add_check("control_file", "Control state file exists", os.path.exists(control_path), "error" if stage == "execute" else "warning", control_path or "missing")
+
+    if is_running is None or stale_lock is None:
+        lock_path = os.path.join(cfg.get("runtime", {}).get("state_dir", ""), "run.lock")
+        is_running = os.path.exists(lock_path)
+        stale_lock = False
+    add_check("run_lock", "Run lock is clear", (not is_running and not stale_lock), "error", "active lock" if is_running else ("stale lock present" if stale_lock else "no active lock"))
+
+    return {
+        "ok": not any((not c["ok"]) and c["severity"] == "error" for c in checks),
+        "workspace": workspace or cfg.get("_workspace") or "default",
+        "stage": stage,
+        "generated_at": datetime.now().strftime("%F %T"),
+        "checks": checks,
+    }
+
+
+def preflight(cfg: dict, stage: str) -> dict:
+    return structured_preflight(cfg, stage)
+
+
+def report_preflight(cfg: dict, stage: str, emit) -> bool:
+    result = structured_preflight(cfg, stage)
+    for check in result["checks"]:
+        status = "OK" if check["ok"] else check["severity"].upper()
+        emit(f"[{status}] {check['id']}: {check['detail']}")
+    return result["ok"]
+
 def sync_framework_docs(cfg: dict, log_fn):
     """將框架的 rules/ 與 generators/ 目錄自動同步至專案內的 .loop/ 目錄，並在異動時 commit。"""
     fw_path = cfg.get("framework_path")

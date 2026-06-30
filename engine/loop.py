@@ -16,8 +16,8 @@ import logging
 from datetime import datetime
 
 from config import load_config, fmt_prompt, select_model, model_tier_label
-from git_utils import inspect_and_fix_blank, git_guard, expand_control_files, changed_files, git_head
-from state import get_val, set_val, as_int, progress_signature, append_round_record, reconstruct_history_and_progress, check_stop_requested, set_human_required
+from git_utils import inspect_and_fix_blank, git_guard, expand_control_files, changed_files, changed_files_between, git_head
+from state import get_val, set_val, as_int, progress_signature, append_round_record, append_round_artifact, append_run_finished, reconstruct_history_and_progress, check_stop_requested, set_human_required
 from agent_runner import build_cmd, run_agent
 from utils import (
     WorkspaceBusy, acquire_run_lock, release_run_lock, touch_run_lock, lock_stale_seconds,
@@ -293,7 +293,7 @@ def update_stuck_state(cfg: dict, control: str, log_both, *, fail_fingerprints, 
             log_both(f"  ↩ 有進展，stuck 解除、換回角色預設模型（{role_tier}）。")
         stuck_level, enhanced_used = 0, 0
         set_val(control, "current_model_tier", model_tier_label(cfg, "execute", 0))
-        set_human_required(control, False)
+        set_human_required(control, False, run_id=cfg.get("run_id"), source="resume")
     elif is_fail_verify:
         rounds_since += 1
         fail_fingerprints.append(fail_fingerprint(control))
@@ -365,7 +365,7 @@ def _run_execute(cfg: dict) -> int:
         acquire_run_lock(lock_path, stale_seconds=lock_stale_seconds(cfg))
     except WorkspaceBusy as e:
         print(f"✋ {e}", flush=True)
-        return 1
+        return finish("preflight_failed", 1)
     try:
         if tree_enabled(cfg):
             return _run_tree_execute_locked(cfg, lock_path)
@@ -397,6 +397,10 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
     })
     log_path = rt["log_file"]
 
+    def finish(status: str, code: int, human_code: str = "") -> int:
+        append_run_finished(cfg, final_status=status, exit_code=code, stage="execute", human_required_code=human_code)
+        return code
+
     def hb(msg=""):
         print(msg, flush=True)
 
@@ -413,7 +417,7 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
 
     os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
     if not report_preflight(cfg, "execute", log_both):
-        return 1
+        return finish("preflight_failed", 1)
 
     log_line("")
     log_line(f"########## LOOP 啟動 {datetime.now():%F %T} ##########")
@@ -446,21 +450,21 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
 
     for i in range(1, rt["max_rounds"] + 1):
         if check_stop_requested(cfg, log_both):
-            return 1
+            return finish("broken_control_file", 1, "broken_control_file")
         rotate_log_if_needed(cfg)
         if not inspect_and_fix_blank(cfg, log_both):
             log_both("🧑‍⚖️ 偵測到 human_required：核心狀態檔毀損且無法自動修復，loop 停止。")
-            set_human_required(control, True, "broken_control_file", "核心狀態檔毀損且無法自動修復")
-            return 2
+            set_human_required(control, True, "broken_control_file", "核心狀態檔毀損且無法自動修復", run_id=run_id, source="execute_loop", suggested_action="手動修復 state.json 或相關控制檔後再 resume。")
+            return finish("human_required", 2, "broken_control_file")
         if lock_path:
             touch_run_lock(lock_path)    # 鎖心跳：長跑時不被誤判殘留而被搶鎖
         sync_framework_docs(cfg, log_both)
 
         passed, halt_reason, halt_msg = run_git_review_gate(cfg, control, log_both)
         if halt_reason:
-            set_human_required(control, True, halt_reason, halt_msg)
+            set_human_required(control, True, halt_reason, halt_msg, run_id=run_id, source="execute_loop", suggested_action="檢查 diff、git 狀態與驗證結果，確認後再 resume。")
             log_both(f"🧑‍⚖️ 偵測到 human_required：{halt_msg}，loop 停止。")
-            return 2
+            return finish("human_required", 2, halt_reason)
         if not passed:
             log_both("  [Git Review Gate] 已還原，跳過本輪執行以重試。")
             _pending_revert_notice = (
@@ -478,19 +482,19 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                     "type": "loop_complete",
                     "message": f"停止條件成立，於第 {i-1} 輪後完成。"
                 })
-                return 0
+                return finish("complete", 0)
             if human_needed(cfg, control):
                 log_both("🧑‍⚖️ 偵測到 human_required：已凍結互卡任務，需你介入裁決。loop 停止。")
-                reason = get_val(control, "human_required_reason")
+                reason = get_val(control, "human_required_code") or get_val(control, "human_required_reason")
                 if not reason:
-                    set_human_required(control, True, "agent_requested", "已凍結互卡任務，需你介入裁決。")
+                    set_human_required(control, True, "agent_requested", "已凍結互卡任務，需你介入裁決。", run_id=run_id, source="execute_loop", suggested_action="處理互卡或衝突後再 resume。")
                 append_round_record(cfg, {
                     "run_id": run_id,
                     "ts": datetime.now().strftime("%F %T"),
                     "type": "human_required",
                     "message": "已凍結互卡任務，需你介入裁決。"
                 })
-                return 2
+                return finish("human_required", 2, reason or "agent_requested")
 
         stuck_level = as_int(get_val(control, "stuck_level"))
         model = select_model(cfg, "execute", stuck_level)
@@ -505,6 +509,7 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         log_line(f"\n════════════ Round {i}  ({ts})  tier={tier} model={model} ════════════")
         log_both(f"  [Execute Prompt]\n{'-'*40}\n{prompt}\n{'-'*40}")
 
+        git_head_before = git_head()
         rc, killed = run_agent(cmd, cfg)
         git_guard(cfg, i, log_both)
         if killed:
@@ -523,8 +528,8 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         upd = update_stuck_state(cfg, control, log_both, fail_fingerprints=fail_fingerprints, progress=progress,
                                   killed=killed, mode=mode, result=result, phase=phase, cur_pass=cur_pass)
         if upd["hard_stop"]:
-            set_human_required(control, True, "stuck_level_2_hard_stop", f"連續 {upd.get('rounds_since')} 輪無進展，觸發硬性保險")
-            return 2
+            set_human_required(control, True, "stuck_level_2_hard_stop", f"連續 {upd.get('rounds_since')} 輪無進展，觸發硬性保險", run_id=run_id, source="execute_loop", suggested_action="檢查最近 round 的變更與驗證證據，再決定如何繼續。")
+            return finish("human_required", 2, "stuck_level_2_hard_stop")
 
         progress = upd["progress"]   # 同步記憶體,供下一輪比對
         
@@ -566,18 +571,30 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                 "commit": current_head,
             }
         })
+        append_round_artifact(
+            cfg,
+            round_no=i,
+            loop_type="execute",
+            phase=phase,
+            changed_files=changed_files_between(git_head_before, current_head),
+            git_head_before=git_head_before,
+            git_head_after=current_head,
+            validation_summary=f"{mode or 'unknown'} -> {result or 'NA'}",
+            validation_status=str(result or "NA").lower(),
+            evidence_files=[],
+        )
 
         time.sleep(rt["interval_seconds"])
 
     log_both(f"⛔ 已達 max_rounds={rt['max_rounds']}，停止（尚未完成，請檢查 {control}）。")
-    set_human_required(control, True, "max_rounds_reached", f"執行輪數已達上限 max_rounds={rt['max_rounds']}")
+    set_human_required(control, True, "max_rounds_reached", f"執行輪數已達上限 max_rounds={rt['max_rounds']}", run_id=run_id, source="execute_loop", suggested_action="檢查目前差異、logs 與驗證結果，再決定是否 resume。")
     append_round_record(cfg, {
         "run_id": run_id,
         "ts": datetime.now().strftime("%F %T"),
         "type": "human_required",
         "message": f"已達 max_rounds={rt['max_rounds']}，停止（尚未完成）。"
     })
-    return 2
+    return finish("human_required", 2, "max_rounds_reached")
 
 
 def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
@@ -607,6 +624,11 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
             "stage": "execute"
         }
     })
+
+    def finish(status: str, code: int, human_code: str = "") -> int:
+        append_run_finished(cfg, final_status=status, exit_code=code, stage="execute", human_required_code=human_code)
+        return code
+
     breaker = cfg.get("breaker", {})
     # ── 硬 BREAKER：max_leaf_reflow（Chunk 7 三條硬 BREAKER 之一）──
     # 單葉被整合打回超過 R 次 = 跨層垂直震盪，撞線即凍結交人。
@@ -663,12 +685,12 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
 
     for i in range(1, rt["max_rounds"] + 1):
         if check_stop_requested(cfg, log_both):
-            return 1
+            return finish("broken_control_file", 1, "broken_control_file")
         rotate_log_if_needed(cfg)
         if not inspect_and_fix_blank(cfg, log_both):
             log_both("🧑‍⚖️ 偵測到 human_required：核心狀態檔毀損且無法自動修復，loop 停止。")
-            set_human_required(control, True, "broken_control_file", "核心狀態檔毀損且無法自動修復")
-            return 2
+            set_human_required(control, True, "broken_control_file", "核心狀態檔毀損且無法自動修復", run_id=run_id, source="tree_execute", suggested_action="手動修復 state.json 或相關控制檔後再 resume。")
+            return finish("human_required", 2, "broken_control_file")
         if lock_path:
             touch_run_lock(lock_path)
         sync_framework_docs(cfg, log_both)
@@ -676,9 +698,9 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         # ── 獨立 Git Review Gate：審查上一輪 commit，破壞性改動自動 revert（與平模式一致，稽核 #2）──
         passed, halt_reason, halt_msg = run_git_review_gate(cfg, control, log_both)
         if halt_reason:
-            set_human_required(control, True, halt_reason, halt_msg)
+            set_human_required(control, True, halt_reason, halt_msg, run_id=run_id, source="tree_execute", suggested_action="檢查 diff、git 狀態與驗證結果，確認後再 resume。")
             log_both(f"🧑‍⚖️ 偵測到 human_required：{halt_msg}，loop 停止。")
-            return 2
+            return finish("human_required", 2, halt_reason)
         if not passed:
             log_both("  [Git Review Gate] 已還原/退回，跳過本輪執行以重試。")
             _pending_revert_notice = (
@@ -701,7 +723,7 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                         "type": "loop_complete",
                         "message": f"樹的所有節點已收斂，於第 {i-1} 輪後完成。"
                     })
-                    return 0
+                    return finish("complete", 0)
                 log_both("⚠️ 無可執行葉子但樹未完成 → 停下交人。")
                 append_round_record(cfg, {
                     "run_id": run_id,
@@ -709,7 +731,7 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                     "type": "human_required",
                     "message": "無可執行葉子但樹未完成。"
                 })
-                return 2
+                return finish("human_required", 2, "agent_requested")
 
         node = get_node(tree_path, current_leaf)
         if node and node["state"] in (LEAF, NEEDS_REVISION):
@@ -722,7 +744,7 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                 log_both(f"  🍃 葉子 [{current_leaf}] 收斂。")
                 rc = _tree_try_unlock(cfg, tree_path, current_leaf, max_leaf_reflow, log_both)
                 if rc is not None:
-                    return rc
+                    return finish("complete" if rc == 0 else "human_required", rc)
                 current_leaf = None
                 continue
             if human_needed(cfg, control):
@@ -733,7 +755,7 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                     "type": "human_required",
                     "message": "偵測到 human_required。"
                 })
-                return 2
+                return finish("human_required", 2, "agent_requested")
 
         stuck_level = as_int(get_val(control, "stuck_level"))
         model = select_model(cfg, "execute", stuck_level)
@@ -748,6 +770,7 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         log_line(f"\n════════════ Round {i}  leaf={current_leaf}  ({ts})  tier={tier} model={model} ════════════")
         log_both(f"  [Tree Execute Prompt]\n{'-'*40}\n{prompt}\n{'-'*40}")
 
+        git_head_before = git_head()
         rc, killed = run_agent(cmd, cfg)
         git_guard(cfg, i, log_both)
         if killed:
@@ -767,7 +790,7 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                                   killed=killed, mode=mode, result=result, phase=phase, cur_pass=cur_pass,
                                   leaf_label=f"葉子 [{current_leaf}] ")
         if upd["hard_stop"]:
-            return 2
+            return finish("human_required", 2, "stuck_level_2_hard_stop")
 
         progress = upd["progress"]
         
@@ -809,13 +832,26 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                 "commit": current_head,
             }
         })
+        append_round_artifact(
+            cfg,
+            round_no=i,
+            loop_type="tree",
+            phase=phase,
+            changed_files=changed_files_between(git_head_before, current_head),
+            git_head_before=git_head_before,
+            git_head_after=current_head,
+            validation_summary=f"{mode or 'unknown'} -> {result or 'NA'}",
+            validation_status=str(result or "NA").lower(),
+            evidence_files=[],
+            leaf=current_leaf,
+        )
 
         # ── 回流偵測：agent 寫 CONTROL 欄位觸發 ──
         structure_err = get_val(control, "tree_structure_error") or ""
         if structure_err.lower() == "true":
             log_both(f"  ⛔ 整合發現結構錯誤（缺葉子/需再拆）→ 停下交人（結構變動屬授權紅線）。")
-            set_human_required(control, True, "tree_structure_error", "整合發現結構錯誤（缺葉子/需再拆），結構變動屬授權紅線。")
-            return 2
+            set_human_required(control, True, "tree_structure_error", "整合發現結構錯誤（缺葉子/需再拆），結構變動屬授權紅線。", run_id=run_id, source="tree_execute", suggested_action="先修正規劃樹結構，再 resume。")
+            return finish("human_required", 2, "tree_structure_error")
 
         reflow_target = get_val(control, "tree_reflow_target") or ""
         if reflow_target:
@@ -831,8 +867,8 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
                     log_both(f"  ⛔ 葉子 [{tid}] 回流次數已達上限 ({max_leaf_reflow})"
                              f" → 凍結交人（垂直震盪 breaker）。")
                     set_node_field(tree_path, tid, "state", FROZEN)
-                    set_human_required(control, True, "max_leaf_reflow_exceeded", f"葉子 [{tid}] 回流次數已達上限 ({max_leaf_reflow})，觸發垂直震盪硬性斷路器。")
-                    return 2
+                    set_human_required(control, True, "max_leaf_reflow_exceeded", f"葉子 [{tid}] 回流次數已達上限 ({max_leaf_reflow})，觸發垂直震盪硬性斷路器。", run_id=run_id, source="tree_execute", suggested_action="檢查該 leaf 的需求與最近輸出後再 resume。")
+                    return finish("human_required", 2, "max_leaf_reflow_exceeded")
                 mark_leaf_needs_revision(tree_path, tid)
                 log_both(f"  ↩ 葉子 [{tid}] 退回修改（回流 #{tnode['reflow_count']+1}）。")
                 did_reflow = True
@@ -854,21 +890,21 @@ def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
 
             rc = _tree_try_unlock(cfg, tree_path, current_leaf, max_leaf_reflow, log_both)
             if rc is not None:
-                return rc
+                return finish("complete" if rc == 0 else "human_required", rc)
             current_leaf = None
             continue
 
         time.sleep(rt["interval_seconds"])
 
     log_both(f"⛔ 已達 max_rounds={rt['max_rounds']}，停止。")
-    set_human_required(control, True, "max_rounds_reached", f"執行輪數已達上限 max_rounds={rt['max_rounds']}")
+    set_human_required(control, True, "max_rounds_reached", f"執行輪數已達上限 max_rounds={rt['max_rounds']}", run_id=cfg.get("run_id"), source="tree_execute", suggested_action="檢查目前差異、logs 與驗證結果，再決定是否 resume。")
     append_round_record(cfg, {
         "run_id": cfg.get("run_id"),
         "ts": datetime.now().strftime("%F %T"),
         "type": "human_required",
         "message": f"已達 max_rounds={rt['max_rounds']}，停止。"
     })
-    return 2
+    return finish("human_required", 2, "max_rounds_reached")
 
 
 def _tree_try_unlock(cfg, tree_path, leaf_id, max_leaf_reflow, log_both) -> int | None:
