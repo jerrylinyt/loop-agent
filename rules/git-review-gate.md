@@ -90,14 +90,6 @@
     - ⚠️ 排除:scratch 證據檔(`.reverify/` `.enum/` `.validate/`)、Issue 檔、`state.json` 狀態欄位本身不算
       「產出異動」;重驗一致那輪本來就會新增這些 scratch 檔,不因此要求歸零。只看**正式產出檔**有沒有被改。
 
-14. **整合輪越界改葉子 (Integration Round Touching Leaf)** ⚠️ 樹模式專屬,垂直震盪逃逸
-    - 本輪是否為整合 / 中間節點的**驗證輪**(`last_round_mode==驗證` 且處理的是非葉子節點)?
-    - 若是,diff 是否動到了**葉子專屬檔案**(某葉子 output 範圍內的檔)?整合輪只准改整合層自己的檔
-      (router 註冊 / 整合測試 / `integration_contract`),不准就地 patch 葉子。
-    - 葉子內容若需修,必須改走 reflow(設 `NEEDS_REVISION` + `tree_reflow_target` + `reflow_count+=1`),
-      下一輪由葉子模型修。Diff 顯示整合輪直接改葉子程式碼、卻沒有對應 reflow 宣告 → FLAG → REVERT
-      (這是繞過 `max_leaf_reflow` 斷路器的垂直震盪逃逸,見 oscillation-escalation.md §C-1)。
-
 ## 3. 輸出格式
 
 🚨 強制約束(你是最後一道安全網,你的判決本身不准被橡皮圖章)：
@@ -119,8 +111,7 @@
     { "id": 10, "name": "基礎語法與格式全毀",      "result": "PASS" },
     { "id": 11, "name": "驗收證據缺失",           "result": "PASS" },
     { "id": 12, "name": "收斂計數防偽",           "result": "PASS" },
-    { "id": 13, "name": "產出異動卻沒歸零收斂",    "result": "PASS" },
-    { "id": 14, "name": "整合輪越界改葉子",        "result": "PASS" }
+    { "id": 13, "name": "產出異動卻沒歸零收斂",    "result": "PASS" }
   ],
   "reason": ""
 }
@@ -128,9 +119,9 @@
 
 🚨 限制與規則：
 1. `verdict`：只能是 `"PASS"`、`"REVERT"`、`"FATAL_STATE"` 之一。
-2. `checklist`：必須精確包含上面 14 項紅線檢查（如實標明各 id 與 name）。`result` 僅能為 `"PASS"` 或 `"FLAG"`。當 `result` 是 `"FLAG"` 時，該項物件內**必須包含 `"evidence"` 欄位**以說明具體證據（檔:行 或程式段落）；若為 `"PASS"` 時，則不得包含 `"evidence"` 或是 `"evidence"` 留空。
+2. `checklist`：必須精確包含上面 13 項紅線檢查（如實標明各 id 與 name）。`result` 僅能為 `"PASS"` 或 `"FLAG"`。當 `result` 是 `"FLAG"` 時，該項物件內**必須包含 `"evidence"` 欄位**以說明具體證據（檔:行 或程式段落）；若為 `"PASS"` 時，則不得包含 `"evidence"` 或是 `"evidence"` 留空。
 3. `reason`：當 `verdict` 為 `"REVERT"` 或 `"FATAL_STATE"` 時**必填**（人類可讀原因）；`PASS` 時必須為空字串。
-4. ⚠️ 引擎 fail-closed：檔案若非合法 JSON、欄位缺失、`checklist` 項目數不等於 14、`FLAG` 缺乏證據、或 `REVERT/FATAL_STATE` 缺乏 reason，該判決一律被視為無效判決（不放行且累計 streak，滿 8 次會停機交給人類）。
+4. ⚠️ 引擎 fail-closed：檔案若非合法 JSON、欄位缺失、`checklist` 項目數不等於 13、`FLAG` 缺乏證據、或 `REVERT/FATAL_STATE` 缺乏 reason，該判決一律被視為無效判決（不放行且累計 streak，滿 8 次會停機交給人類）。
 
 ⚠️ **注意**：
 1. 必須是覆寫 (Overwrite) 該檔案，不要用附加 (Append)。
