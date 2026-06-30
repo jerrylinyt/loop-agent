@@ -41,9 +41,9 @@ agent:
   build_cmd: "opencode run -m {model} {prompt}"   # {model}/{prompt} 帶入；可加 {args} 佔位插入 extra_args
   extra_args: []                                  # 額外固定 CLI 參數（如 ["--yolo"]）；無 {args} 佔位則接在 prompt 前
   models:
-    fast: "<你的極速模型>"                            # 樹模式葉子節點 / Git Review Gate 專用（例如 gemini-2.5-flash）
-    normal: "<你的標準模型>"                          # 主要 Execute / Plan 引擎（例如 gemini-2.5-pro）
-    thinking: "<你的思考模型>"                        # 卡關時自動切換的高階模型 / 拆解分析
+    fast: "<你的極速模型>"
+    normal: "<你的標準模型>"
+    thinking: "<你的思考模型>"
   # prompts 省略 → 用框架 engine/prompts.yaml 預設。要客製單一 prompt 才取消註解覆寫：
   # prompts:
   #   base: |
@@ -83,11 +83,4 @@ agent:
 #   journal_in_control_keep: 1
 #   control_max_bytes: 60000
 #   console_echo: true           # agent 詳細輸出直接印主控台；--quiet 或 LOOP_QUIET=1 關閉
-# min_unit:                      # 最小工作單位 proxy 圍欄（樹模式葉子）
-#   max_files: 3
-#   max_lines: 150
-# breaker:                       # 硬 breaker：撞線即凍結交人，程式不准自我放寬
-#   max_depth: 5
-#   max_leaves: 1000
-#   max_leaf_reflow: 3
-#   growth_stall_rounds: 6
+

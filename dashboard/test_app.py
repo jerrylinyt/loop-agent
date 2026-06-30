@@ -686,7 +686,7 @@ def test_git_review_gate_requires_json_verdict():
             f.write("[REVIEW: PASS]\n")
         assert _load_review_verdict(result_path) is None
 
-        checklist = [{"id": i + 1, "name": f"check {i}", "result": "PASS"} for i in range(14)]
+        checklist = [{"id": i + 1, "name": f"check {i}", "result": "PASS"} for i in range(13)]
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump({"verdict": "PASS", "reason": "", "checklist": checklist}, f)
 

@@ -52,18 +52,7 @@ DEFAULTS = {
         "enhanced_max_rounds": 8,
         "human_stop_after": 4,
     },
-    # ── 最小工作單位 proxy 圍欄（可校準） ──
-    "min_unit": {
-        "max_files": 3,
-        "max_lines": 150,
-    },
-    # ── 硬 breaker：撞線即凍結交人，程式不准自我放寬（可校準） ──
-    "breaker": {
-        "max_depth": 5,
-        "max_leaves": 1000,        # 刻意設大——明顯壞掉才觸發的跳閘，非壓樹目標
-        "max_leaf_reflow": 3,
-        "growth_stall_rounds": 6,
-    },
+    # min_unit and breaker config removed
     "runtime": {
         "max_rounds": 600,
         "interval_seconds": 5,
@@ -85,15 +74,14 @@ DEFAULTS = {
         # 額外固定 CLI 參數（如 ["--yolo"]）；template 無 {args} 佔位時，接在 {prompt} 之前
         "extra_args": [],
         "models": {
-            "fast": "flash",  # 葉子執行（可校準）
-            "normal": "",     # review／整合驗證（可校準）
-            "thinking": "",   # 拆解／分析（可校準）
+            "fast": "flash",
+            "normal": "",
+            "thinking": "",
         },
         # ── 角色維預設指派（可校準） ──
         "roles": {
-            "decompose": "thinking",
+            "plan": "thinking",
             "review": "normal",
-            "integrate": "normal",
             "execute": "fast",
         },
         # 提示樣板：外部化到 engine/prompts.yaml（框架預設層）。

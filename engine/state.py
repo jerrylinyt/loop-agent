@@ -94,38 +94,7 @@ def get_val_from_json_data(data: dict, key: str) -> str | None:
         val = data.get("last_writer", {}).get("ts")
         return str(val) if val is not None else ""
 
-    # 2. tree_enabled
-    if key == "tree_enabled":
-        return "true" if data.get("mode") == "tree" else "false"
-
-    # 3. 樹全局欄位
-    if key == "tree_root":
-        return data.get("tree", {}).get("root")
-    if key == "tree_total_nodes":
-        return str(len(data.get("tree", {}).get("nodes", {})))
-    if key == "tree_total_leaves":
-        nodes = data.get("tree", {}).get("nodes", {})
-        leaves = [n for n in nodes.values() if n.get("state") == "LEAF"]
-        return str(len(leaves))
-    if key == "tree_max_depth":
-        nodes = data.get("tree", {}).get("nodes", {})
-        depths = [n.get("depth", 0) for n in nodes.values()]
-        return str(max(depths) if depths else 0)
-
-    # 4. node_{node_id}_{field}
-    if key.startswith("node_"):
-        fields = ("state", "children", "parent", "depth", "stable_rounds", "reflow_count", "depends_on")
-        for f in fields:
-            suffix = f"_{f}"
-            if key.endswith(suffix):
-                node_id = key[5:-len(suffix)]
-                node = data.get("tree", {}).get("nodes", {}).get(node_id)
-                if node:
-                    val = node.get(f)
-                    if isinstance(val, list):
-                        return ",".join(val)
-                    return str(val) if val is not None else ""
-                return None
+    # tree mode keys removed
 
     # 5. p{phase_id}_consecutive_pass 等計數器
     phase_pat = re.match(r"^p(\d+)_(consecutive_pass|total_validations|last_result)$", key)
@@ -199,40 +168,7 @@ def set_val_in_json_data(data: dict, key: str, value: str):
         data["last_writer"][field] = value
         return
 
-    # 2. tree_enabled
-    if key == "tree_enabled":
-        data["mode"] = "tree" if to_bool(value) else "flat"
-        return
-
-    # 3. tree全局欄位
-    if key == "tree_root":
-        if "tree" not in data:
-            data["tree"] = {"root": "", "nodes": {}}
-        data["tree"]["root"] = value
-        return
-
-    # 4. node_{node_id}_{field}
-    if key.startswith("node_"):
-        fields = ("state", "children", "parent", "depth", "stable_rounds", "reflow_count", "depends_on")
-        for f in fields:
-            suffix = f"_{f}"
-            if key.endswith(suffix):
-                node_id = key[5:-len(suffix)]
-                if "tree" not in data:
-                    data["tree"] = {"root": "root", "nodes": {}}
-                if "nodes" not in data["tree"]:
-                    data["tree"]["nodes"] = {}
-                if node_id not in data["tree"]["nodes"]:
-                    data["tree"]["nodes"][node_id] = {}
-                
-                node = data["tree"]["nodes"][node_id]
-                if f in ("children", "depends_on"):
-                    node[f] = [c.strip() for c in value.split(",") if c.strip()]
-                elif f in ("depth", "stable_rounds", "reflow_count"):
-                    node[f] = to_int(value)
-                else:
-                    node[f] = value
-                return
+    # tree mode setters removed
 
     # 5. p{phase_id}_consecutive_pass 等計數器
     phase_pat = re.match(r"^p(\d+)_(consecutive_pass|total_validations|last_result)$", key)
@@ -959,19 +895,7 @@ if __name__ == "__main__":
     is_p.add_argument("--id", required=True)
     is_p.add_argument("--to", required=True, choices=["OPEN", "RESOLVED"])
     
-    # node-set-state
-    ns_p = subparsers.add_parser("node-set-state")
-    ns_p.add_argument("--node", required=True)
-    ns_p.add_argument("--to", required=True, choices=["PENDING", "DECOMPOSED", "LEAF", "IN_PROGRESS", "CONVERGED", "NEEDS_REVISION", "FROZEN"])
-    
-    # node-children
-    nc_p = subparsers.add_parser("node-children")
-    nc_p.add_argument("--node", required=True)
-    nc_p.add_argument("--set", required=True)
-    
-    # node-reflow
-    nr_p = subparsers.add_parser("node-reflow")
-    nr_p.add_argument("--node", required=True)
+    # node subcommand parser definitions removed
     
     # render-control
     rc_p = subparsers.add_parser("render-control")
@@ -1203,58 +1127,7 @@ if __name__ == "__main__":
             print(f"OK issue-set-status {args.id} to {args.to}")
             sys.exit(0)
             
-    elif args.cmd in ("node-set-state", "node-children", "node-reflow"):
-        data = load_state_json(state_path)
-        if "tree" not in data:
-            data["tree"] = {"root": "root", "nodes": {}}
-        nodes = data["tree"].setdefault("nodes", {})
-        
-        if args.cmd == "node-set-state":
-            node = nodes.setdefault(args.node, {
-                "state": "PENDING", "children": [], "parent": None,
-                "depth": 0, "stable_rounds": 0, "reflow_count": 0, "depends_on": []
-            })
-            node["state"] = args.to
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK node-set-state {args.node} to {args.to}")
-            sys.exit(0)
-            
-        elif args.cmd == "node-children":
-            node = nodes.setdefault(args.node, {
-                "state": "PENDING", "children": [], "parent": None,
-                "depth": 0, "stable_rounds": 0, "reflow_count": 0, "depends_on": []
-            })
-            children = [c.strip() for c in args.set.split(",") if c.strip()]
-            node["children"] = children
-            if node["state"] == "PENDING":
-                node["state"] = "DECOMPOSED"
-            
-            # 為子節點設定 parent 與 depth
-            for c in children:
-                c_node = nodes.setdefault(c, {
-                    "state": "PENDING", "children": [], "parent": args.node,
-                    "depth": node.get("depth", 0) + 1, "stable_rounds": 0, "reflow_count": 0, "depends_on": []
-                })
-                c_node["parent"] = args.node
-                c_node["depth"] = node.get("depth", 0) + 1
-                
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK node-children {args.node} children set to {children}")
-            sys.exit(0)
-            
-        elif args.cmd == "node-reflow":
-            node = nodes.get(args.node)
-            if not node:
-                print(f"Error: Node '{args.node}' not found.", file=sys.stderr)
-                sys.exit(1)
-            node["reflow_count"] = node.get("reflow_count", 0) + 1
-            node["state"] = "NEEDS_REVISION"
-            save_state_json(state_path, data)
-            render_all(state_path)
-            print(f"OK node-reflow {args.node} reflow_count={node['reflow_count']}")
-            sys.exit(0)
+    # node handlers removed
             
     elif args.cmd == "render-control":
         print(f"OK render-control to {args.out} (noop)")

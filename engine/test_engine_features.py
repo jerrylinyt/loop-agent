@@ -53,8 +53,6 @@ def test_structured_preflight_returns_checks():
                 "git_review": "x",
                 "plan": "x",
                 "plan_gate": "x",
-                "tree_decompose": "x",
-                "tree_decompose_gate": "x",
             },
             "build_cmd": "python",
         },

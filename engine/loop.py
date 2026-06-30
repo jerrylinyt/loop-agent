@@ -25,12 +25,7 @@ from utils import (
     update_index, report_preflight, fail_fingerprint, detect_oscillation, is_done, human_needed,
     sync_framework_docs
 )
-from tree import (
-    tree_enabled, tree_md_path, get_node, set_node_field,
-    next_ready_leaf, try_unlock_parent, mark_leaf_needs_revision,
-    all_children_converged, list_by_state, format_tree_for_human,
-    IN_PROGRESS, CONVERGED, NEEDS_REVISION, FROZEN, LEAF,
-)
+# tree module imports removed
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +53,7 @@ def _load_review_verdict(result_file: str) -> dict | None:
 
 def _review_checklist_valid(verdict: dict) -> bool:
     checklist = verdict.get("checklist")
-    if not isinstance(checklist, list) or len(checklist) != 14:
+    if not isinstance(checklist, list) or len(checklist) != 13:
         return False
     for item in checklist:
         if not isinstance(item, dict):
@@ -181,7 +176,7 @@ def run_git_review_gate(cfg: dict, control: str, log_both) -> tuple[bool, str, s
             reason = f"Git Review Gate verdict value '{decision}' is invalid (must be PASS, REVERT, or FATAL_STATE)."
         elif not _review_checklist_valid(verdict):
             is_valid = False
-            reason = "Git Review Gate checklist format is invalid (must be exactly 14 items, and FLAG items must have evidence)."
+            reason = "Git Review Gate checklist format is invalid (must be exactly 13 items, and FLAG items must have evidence)."
         elif decision in ("REVERT", "FATAL_STATE") and not reason:
             is_valid = False
             reason = f"Git Review Gate verdict is {decision} but reason is empty."
@@ -365,10 +360,8 @@ def _run_execute(cfg: dict) -> int:
         acquire_run_lock(lock_path, stale_seconds=lock_stale_seconds(cfg))
     except WorkspaceBusy as e:
         print(f"✋ {e}", flush=True)
-        return finish("preflight_failed", 1)
+        return 1
     try:
-        if tree_enabled(cfg):
-            return _run_tree_execute_locked(cfg, lock_path)
         return _run_execute_locked(cfg, lock_path)
     finally:
         release_run_lock(lock_path)
@@ -597,345 +590,7 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
     return finish("human_required", 2, "max_rounds_reached")
 
 
-def _run_tree_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
-    """樹模式執行：葉子逐一跑、父等子解鎖、回流分兩種。
-
-    排程：pick ready leaf → agent 跑葉子 → 收斂 → 解鎖父 → 整合驗證。
-    回流 (a) 葉子內容錯 → NEEDS_REVISION（受 max_leaf_reflow 管）。
-    回流 (b) 結構錯（缺葉子/需再拆）→ 停、交人（授權紅線）。
-    """
-    repo_basename = os.path.basename(os.path.normpath(cfg["repo"]))
-    ws_name = cfg["workspace"]
-    start_epoch = int(time.time())
-    run_id = f"{repo_basename}:{ws_name}:{start_epoch}"
-    cfg["run_id"] = run_id
-
-    rt = cfg["runtime"]
-    control = cfg["control"]
-    osc = cfg["oscillation"]
-    
-    # Log run_started event
-    append_round_record(cfg, {
-        "run_id": run_id,
-        "ts": datetime.now().strftime("%F %T"),
-        "type": "run_started",
-        "payload": {
-            "mode": cfg.get("generation", {}).get("mode", "gated"),
-            "stage": "execute"
-        }
-    })
-
-    def finish(status: str, code: int, human_code: str = "") -> int:
-        append_run_finished(cfg, final_status=status, exit_code=code, stage="execute", human_required_code=human_code)
-        return code
-
-    breaker = cfg.get("breaker", {})
-    # ── 硬 BREAKER：max_leaf_reflow（Chunk 7 三條硬 BREAKER 之一）──
-    # 單葉被整合打回超過 R 次 = 跨層垂直震盪，撞線即凍結交人。
-    max_leaf_reflow = breaker.get("max_leaf_reflow", 3)
-    log_path = rt["log_file"]
-    tree_path = tree_md_path(cfg)
-
-    def hb(msg=""):
-        print(msg, flush=True)
-
-    def log_line(msg=""):
-        try:
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(msg + "\n")
-        except OSError as e:
-            logger.error(f"Failed to write log: {e}")
-
-    def log_both(msg=""):
-        hb(msg)
-        log_line(msg)
-
-    os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
-    if not report_preflight(cfg, "tree_execute", log_both):
-        return 1
-
-    log_line("")
-    log_line(f"########## TREE EXECUTE 啟動 {datetime.now():%F %T} ##########")
-    hb(f"Tree Execute 啟動。框架={cfg['framework_path']}  詳細輸出：{log_path}\n")
-
-    fw = cfg["framework_path"]
-    if os.path.isdir(fw) and shutil.which("git"):
-        try:
-            r = subprocess.run(["git", "-C", fw, "rev-parse", "--short", "HEAD"],
-                               capture_output=True, text=True)
-            if r.returncode == 0 and r.stdout.strip():
-                set_val(control, "framework_ref", r.stdout.strip())
-        except OSError:
-            pass
-
-    prompts = cfg["agent"]["prompts"]
-    base_prompt = fmt_prompt(prompts.get("base", ""), control=control, framework=fw)
-    escalation_prompt = fmt_prompt(prompts.get("escalation", ""), control=control, framework=fw)
-
-    state_dir = rt["state_dir"]
-    os.makedirs(state_dir, exist_ok=True)
-    fail_fingerprints, progress = reconstruct_history_and_progress(cfg, osc["osc_window"])
-    if fail_fingerprints:
-        log_both(f"  ↺ 從 rounds.jsonl 接續震盪歷史（{len(fail_fingerprints)} 筆）。")
-    if progress:
-        log_both(f"  ↺ 從 rounds.jsonl 接續進度標記（idle={progress.get('idle', '0')}）。")
-
-    current_leaf = None
-    _pending_revert_notice = ""
-
-    for i in range(1, rt["max_rounds"] + 1):
-        if check_stop_requested(cfg, log_both):
-            return finish("broken_control_file", 1, "broken_control_file")
-        rotate_log_if_needed(cfg)
-        if not inspect_and_fix_blank(cfg, log_both):
-            log_both("🧑‍⚖️ 偵測到 human_required：核心狀態檔毀損且無法自動修復，loop 停止。")
-            set_human_required(control, True, "broken_control_file", "核心狀態檔毀損且無法自動修復", run_id=run_id, source="tree_execute", suggested_action="手動修復 state.json 或相關控制檔後再 resume。")
-            return finish("human_required", 2, "broken_control_file")
-        if lock_path:
-            touch_run_lock(lock_path)
-        sync_framework_docs(cfg, log_both)
-
-        # ── 獨立 Git Review Gate：審查上一輪 commit，破壞性改動自動 revert（與平模式一致，稽核 #2）──
-        passed, halt_reason, halt_msg = run_git_review_gate(cfg, control, log_both)
-        if halt_reason:
-            set_human_required(control, True, halt_reason, halt_msg, run_id=run_id, source="tree_execute", suggested_action="檢查 diff、git 狀態與驗證結果，確認後再 resume。")
-            log_both(f"🧑‍⚖️ 偵測到 human_required：{halt_msg}，loop 停止。")
-            return finish("human_required", 2, halt_reason)
-        if not passed:
-            log_both("  [Git Review Gate] 已還原/退回，跳過本輪執行以重試。")
-            _pending_revert_notice = (
-                f"⚠️ 上一輪 commit 已被 Git Review Gate 自動 REVERT。原因：{halt_msg}\n"
-                "本輪請先確認並避免相同問題，再動手執行任務。"
-            )
-            current_leaf = None    # 被 revert 後重新挑葉子,避免指向已回退狀態
-            continue
-
-        # ── 選下一個可執行葉子 ──
-        if current_leaf is None:
-            current_leaf = next_ready_leaf(tree_path)
-            if current_leaf is None:
-                root_id = get_val(tree_path, "tree_root")
-                if root_id and all_children_converged(tree_path, root_id):
-                    log_both(f"✅ 樹的所有節點已收斂，於第 {i-1} 輪後完成。TREE EXECUTE COMPLETE")
-                    append_round_record(cfg, {
-                        "run_id": run_id,
-                        "ts": datetime.now().strftime("%F %T"),
-                        "type": "loop_complete",
-                        "message": f"樹的所有節點已收斂，於第 {i-1} 輪後完成。"
-                    })
-                    return finish("complete", 0)
-                log_both("⚠️ 無可執行葉子但樹未完成 → 停下交人。")
-                append_round_record(cfg, {
-                    "run_id": run_id,
-                    "ts": datetime.now().strftime("%F %T"),
-                    "type": "human_required",
-                    "message": "無可執行葉子但樹未完成。"
-                })
-                return finish("human_required", 2, "agent_requested")
-
-        node = get_node(tree_path, current_leaf)
-        if node and node["state"] in (LEAF, NEEDS_REVISION):
-            set_node_field(tree_path, current_leaf, "state", IN_PROGRESS)
-
-        # ── 模型選擇（沿用既有 stuck_level 階梯）──
-        if os.path.exists(control):
-            if is_done(cfg, control):
-                set_node_field(tree_path, current_leaf, "state", CONVERGED)
-                log_both(f"  🍃 葉子 [{current_leaf}] 收斂。")
-                rc = _tree_try_unlock(cfg, tree_path, current_leaf, max_leaf_reflow, log_both)
-                if rc is not None:
-                    return finish("complete" if rc == 0 else "human_required", rc)
-                current_leaf = None
-                continue
-            if human_needed(cfg, control):
-                log_both("🧑‍⚖️ 偵測到 human_required → 停下交人。")
-                append_round_record(cfg, {
-                    "run_id": run_id,
-                    "ts": datetime.now().strftime("%F %T"),
-                    "type": "human_required",
-                    "message": "偵測到 human_required。"
-                })
-                return finish("human_required", 2, "agent_requested")
-
-        stuck_level = as_int(get_val(control, "stuck_level"))
-        model = select_model(cfg, "execute", stuck_level)
-        tier = model_tier_label(cfg, "execute", stuck_level)
-        prompt = (_pending_revert_notice + "\n" if _pending_revert_notice else "") \
-                 + base_prompt + ("\n" + escalation_prompt if stuck_level >= 1 else "")
-        _pending_revert_notice = ""
-        cmd = build_cmd(cfg, model, prompt)
-
-        ts = datetime.now().strftime("%F %T")
-        hb(f"▶ Round {i} 葉子=[{current_leaf}] ({ts}) tier={tier}")
-        log_line(f"\n════════════ Round {i}  leaf={current_leaf}  ({ts})  tier={tier} model={model} ════════════")
-        log_both(f"  [Tree Execute Prompt]\n{'-'*40}\n{prompt}\n{'-'*40}")
-
-        git_head_before = git_head()
-        rc, killed = run_agent(cmd, cfg)
-        git_guard(cfg, i, log_both)
-        if killed:
-            hb(f"  Round {i} 被 watchdog 中斷（{killed}）。")
-            set_val(control, "last_round_result", "NA")
-            set_val(control, "last_round_mode", "中斷")
-        else:
-            hb(f"  Round {i} 結束 (rc={rc})")
-
-        # ── 進展判定 + stuck 升級（沿用既有邏輯）──
-        phase = get_val(control, "current_phase")
-        cur_pass = as_int(get_val(control, f"p{phase}_consecutive_pass"))
-        mode = get_val(control, "last_round_mode") or ""
-        result = get_val(control, "last_round_result") or ""
-
-        upd = update_stuck_state(cfg, control, log_both, fail_fingerprints=fail_fingerprints, progress=progress,
-                                  killed=killed, mode=mode, result=result, phase=phase, cur_pass=cur_pass,
-                                  leaf_label=f"葉子 [{current_leaf}] ")
-        if upd["hard_stop"]:
-            return finish("human_required", 2, "stuck_level_2_hard_stop")
-
-        progress = upd["progress"]
-        
-        last_safe_sha = get_val(control, "last_safe_sha") or ""
-        current_head = git_head()
-        
-        # Oscillation fingerprint tracking
-        fail_fp = None
-        is_fail_verify = (not killed) and ("驗證" in mode) and (result == "FAIL")
-        if is_fail_verify:
-            fail_fp = fail_fingerprint(control)
-            
-        append_round_record(cfg, {
-            "run_id": run_id,
-            "ts": datetime.now().strftime("%F %T"),
-            "type": "round_finished",
-            "round": i,
-            "loop_type": "tree",
-            "phase": phase,
-            "leaf": current_leaf,
-            "result": result,
-            "mode": mode,
-            "killed": killed,
-            "stuck_level": upd["stuck_level"],
-            "rounds_since_progress": upd["rounds_since"],
-            "enhanced_rounds_used": upd["enhanced_used"],
-            "no_activity": upd["no_activity"],
-            "consecutive_pass": cur_pass,
-            "progressed": upd["progressed"],
-            "model_tier": tier,
-            "progress_sig": progress.get("sig") or "",
-            "idle_rounds": as_int(progress.get("idle")),
-            "killed_streak": as_int(progress.get("killed_streak")),
-            "fail_fingerprint": fail_fp,
-            "artifacts": {
-                "changed_files": changed_files(),
-                "git_head_before": last_safe_sha,
-                "git_head_after": current_head,
-                "commit": current_head,
-            }
-        })
-        append_round_artifact(
-            cfg,
-            round_no=i,
-            loop_type="tree",
-            phase=phase,
-            changed_files=changed_files_between(git_head_before, current_head),
-            git_head_before=git_head_before,
-            git_head_after=current_head,
-            validation_summary=f"{mode or 'unknown'} -> {result or 'NA'}",
-            validation_status=str(result or "NA").lower(),
-            evidence_files=[],
-            leaf=current_leaf,
-        )
-
-        # ── 回流偵測：agent 寫 CONTROL 欄位觸發 ──
-        structure_err = get_val(control, "tree_structure_error") or ""
-        if structure_err.lower() == "true":
-            log_both(f"  ⛔ 整合發現結構錯誤（缺葉子/需再拆）→ 停下交人（結構變動屬授權紅線）。")
-            set_human_required(control, True, "tree_structure_error", "整合發現結構錯誤（缺葉子/需再拆），結構變動屬授權紅線。", run_id=run_id, source="tree_execute", suggested_action="先修正規劃樹結構，再 resume。")
-            return finish("human_required", 2, "tree_structure_error")
-
-        reflow_target = get_val(control, "tree_reflow_target") or ""
-        if reflow_target:
-            did_reflow = False
-            for tid in (t.strip() for t in reflow_target.split(",") if t.strip()):
-                tnode = get_node(tree_path, tid)
-                if tnode is None:
-                    continue
-                if tnode["reflow_count"] >= max_leaf_reflow:
-                    # ── 硬 BREAKER：max_leaf_reflow（Chunk 7）──
-                    # 跨層垂直震盪：整合 ↔ 葉子反覆打回，既有水平震盪偵測抓不到。
-                    # 撞線即凍結交人，程式不准升級/重試/自我放寬。
-                    log_both(f"  ⛔ 葉子 [{tid}] 回流次數已達上限 ({max_leaf_reflow})"
-                             f" → 凍結交人（垂直震盪 breaker）。")
-                    set_node_field(tree_path, tid, "state", FROZEN)
-                    set_human_required(control, True, "max_leaf_reflow_exceeded", f"葉子 [{tid}] 回流次數已達上限 ({max_leaf_reflow})，觸發垂直震盪硬性斷路器。", run_id=run_id, source="tree_execute", suggested_action="檢查該 leaf 的需求與最近輸出後再 resume。")
-                    return finish("human_required", 2, "max_leaf_reflow_exceeded")
-                mark_leaf_needs_revision(tree_path, tid)
-                log_both(f"  ↩ 葉子 [{tid}] 退回修改（回流 #{tnode['reflow_count']+1}）。")
-                did_reflow = True
-            set_val(control, "tree_reflow_target", "")
-            if did_reflow:
-                current_leaf = None
-                continue
-
-        # ── 葉子收斂判定 ──
-        if os.path.exists(control) and is_done(cfg, control):
-            set_node_field(tree_path, current_leaf, "state", CONVERGED)
-            log_both(f"  🍃 葉子 [{current_leaf}] 收斂。")
-            # stuck 歸零供下一葉子
-            stuck_level, enhanced_used, rounds_since = 0, 0, 0
-            set_val(control, "stuck_level", "0")
-            set_val(control, "enhanced_rounds_used", "0")
-            set_val(control, "rounds_since_progress", "0")
-            fail_fingerprints.clear()
-
-            rc = _tree_try_unlock(cfg, tree_path, current_leaf, max_leaf_reflow, log_both)
-            if rc is not None:
-                return finish("complete" if rc == 0 else "human_required", rc)
-            current_leaf = None
-            continue
-
-        time.sleep(rt["interval_seconds"])
-
-    log_both(f"⛔ 已達 max_rounds={rt['max_rounds']}，停止。")
-    set_human_required(control, True, "max_rounds_reached", f"執行輪數已達上限 max_rounds={rt['max_rounds']}", run_id=cfg.get("run_id"), source="tree_execute", suggested_action="檢查目前差異、logs 與驗證結果，再決定是否 resume。")
-    append_round_record(cfg, {
-        "run_id": cfg.get("run_id"),
-        "ts": datetime.now().strftime("%F %T"),
-        "type": "human_required",
-        "message": f"已達 max_rounds={rt['max_rounds']}，停止。"
-    })
-    return finish("human_required", 2, "max_rounds_reached")
-
-
-def _tree_try_unlock(cfg, tree_path, leaf_id, max_leaf_reflow, log_both) -> int | None:
-    """葉子收斂後：嘗試解鎖父節點、觸發整合驗證。
-
-    回傳 int = 該值應直接 return（完成/停下交人）；None = 繼續迴圈。
-    """
-    parent_id = try_unlock_parent(tree_path, leaf_id)
-    if parent_id is None:
-        return None
-
-    log_both(f"  📦 父節點 [{parent_id}] 所有子都已收斂 → 解鎖。")
-
-    # 遞迴往上：父也可能解鎖祖父
-    root_id = get_val(tree_path, "tree_root")
-    if parent_id == root_id:
-        if all_children_converged(tree_path, root_id):
-            log_both(f"✅ 根節點 [{root_id}] 所有子都已收斂。TREE EXECUTE COMPLETE")
-            append_round_record(cfg, {
-                "run_id": cfg.get("run_id"),
-                "ts": datetime.now().strftime("%F %T"),
-                "type": "loop_complete",
-                "message": f"根節點 [{root_id}] 所有子都已收斂。TREE EXECUTE COMPLETE"
-            })
-            return 0
-    else:
-        grandparent_id = try_unlock_parent(tree_path, parent_id)
-        if grandparent_id:
-            log_both(f"  📦 祖父節點 [{grandparent_id}] 也已解鎖。")
-
-    return None
+# tree execution functions removed
 
 
 if __name__ == "__main__":

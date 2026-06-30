@@ -27,19 +27,6 @@
 
 ---
 
-## 2. 樹狀模式狀態模型（state.json 中的 tree 欄位）
-
-在樹形漸進拆解模式下，整棵樹的拓撲結構與狀態均活在 `state.json` 的 `tree` 物件下。
-
-- `tree.root`：樹的根節點 ID。
-- `tree.nodes.{node_id}`：包含該節點的屬性：
-  - `state`：節點生命週期狀態（`PENDING`、`DECOMPOSED`、`LEAF`、`IN_PROGRESS`、`CONVERGED`、`NEEDS_REVISION`、`FROZEN`）。
-  - `children`：子節點 ID 陣列。
-  - `parent`：父節點 ID。
-  - `depth`：節點在樹中的深度。
-  - `depends_on`：兄弟節點的依賴陣列。
-  - `stable_rounds`：規劃期子節點集合連續穩定的輪數。
-  - `reflow_count`：執行期該葉子被退回修復的次數。
 
 ---
 
@@ -49,8 +36,6 @@
 |------|------------------------|---------|
 | **BOOT SEQUENCE** | STEP G→10：一輪【只做一個任務/一次驗證】，STEP 10 後 agent 結束並交回控制權；更新狀態使用 CLI 寫入 | agent |
 | **Phase Gate (平模式)** | 相鄰階段 i→i+1：`phase i 全 CONVERGED 且 p{i}_pass>=門檻 且 blocking==0` | 引擎 + agent |
-| **Phase Gate (樹模式)** | **規劃期 → 執行期**：全樹無 `PENDING` 節點且規劃完成 → 暫停進入 **人類 Gate**。 | 引擎 + 人類 |
-| **向上解鎖 (樹模式)** | **自底向上解鎖**：中間/父節點在所有子節點皆為 `CONVERGED` 後，由引擎解鎖為 `CONVERGED`。 | 引擎 |
 | **停止(正常)** | `current_phase==最後階段 且 最後階段全任務 CONVERGED 且 p{last}_pass>=final_phase_pass_gte 且 blocking==0` | 引擎 |
 | **停止(交人類)** | `human_required==true` | 引擎 |
 
@@ -67,8 +52,8 @@
 為確保狀態變更安全無虞，`state.py` 內建了多重的剛性校驗。任何違反以下規則的 CLI 操作均會被拒絕並報錯（回傳 exit code 1）：
 
 ### 5.1 鍵值白名單與類型約束 (Key & Type Whitelist)
-- **寫入白名單限制**：使用 `set` 或 `incr` 更新欄位時，鍵值 (Key) 必須位於預設的白名單中（包含 `current_phase`、`last_round_mode`、計數器欄位如 `p{id}_consecutive_pass`、節點欄位 `node_{id}_{field}` 等）。未在白名單內之鍵值將被拒絕變更。
-- **數值遞增限制**：`incr` 指令僅適用於數值型鍵值（如 `consecutive_pass`、`total_validations`、`rounds_since_progress`、`stuck_level`、`depth`、`stable_rounds`、`reflow_count` 等）。非數值型欄位執行 `incr` 將報錯。
+- **寫入白名單限制**：使用 `set` 或 `incr` 更新欄位時，鍵值 (Key) 必須位於預設的白名單中（包含 `current_phase`、`last_round_mode`、計數器欄位如 `p{id}_consecutive_pass` 等）。未在白名單內之鍵值將被拒絕變更。
+- **數值遞增限制**：`incr` 指令僅適用於數值型鍵值（如 `consecutive_pass`、`total_validations`、`rounds_since_progress`、`stuck_level` 等）。非數值型欄位執行 `incr` 將報錯。
 
 ### 5.2 狀態轉換守衛 (Guarded Transition)
 每次寫入時，引擎會對寫入前後的變更進行「守衛驗證」：

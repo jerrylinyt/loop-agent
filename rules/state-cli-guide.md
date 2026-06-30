@@ -114,26 +114,7 @@ Issue 的狀態包括 `OPEN`、`RESOLVED`、`WONTFIX`：
 
 ---
 
-## 5. 樹狀模式節點操作 (`node-*`)
 
-> *注意：此命令僅在專案啟用樹狀模式 (`mode: "tree"`) 時使用。*
-
-- **設定節點狀態**：
-  ```bash
-  {state_cli} node-set-state --node <node_id> --state <state>
-  # 範例
-  {state_cli} node-set-state --node leaf_task_a --state IN_PROGRESS
-  ```
-- **為中間節點提議子節點集合**（逗號分隔）：
-  ```bash
-  {state_cli} node-children --node root --children "leaf_a,leaf_b,leaf_c"
-  ```
-- **觸發節點依賴重構與深度重算**：
-  ```bash
-  {state_cli} node-reflow --node root
-  ```
-
----
 
 ## 🚨 執行後驗證與注意事項
 每次你呼叫 `{state_cli}` 更新狀態後：
@@ -150,7 +131,7 @@ Issue 的狀態包括 `OPEN`、`RESOLVED`、`WONTFIX`：
 1. **欄位寫入白名單**：
    - 只能修改白名單內的鍵值（如 `current_phase`、`last_round_mode` 等），禁止寫入自訂的隨意鍵值。
 2. **累加限制 (`incr`)**：
-   - `incr` 僅限用於數值型鍵值（如 `consecutive_pass`、`total_validations`、`rounds_since_progress`、`stuck_level`、`depth`、`stable_rounds`、`reflow_count` 等）。非數值型欄位無法累加。
+   - `incr` 僅限用於數值型鍵值（如 `consecutive_pass`、`total_validations`、`rounds_since_progress`、`stuck_level` 等）。非數值型欄位無法累加。
 3. **流程與守衛保護 (Guarded Transition)**：
    - `human_required` 與 `plan_human_required` 一旦為 `true`，**嚴禁**直接透過 `set` 寫回 `false`。必須透過系統的恢復管道（如 `resume`、`dashboard_resume`）解除。
    - `current_phase` 只能往前推進，**嚴禁**改小（逆向移動）。
