@@ -7,7 +7,7 @@
 ## A. 三種「卡住」與偵測訊號
 | 卡法 | 現象 | 偵測訊號 |
 |------|------|----------|
-| **不收斂** | 同一問題一直修不好 | `rounds_since_progress >= stall_threshold`（連續失敗驗證輪沒進展） |
+| **不收斂** | 同一問題一直修不好 | `rounds_since_progress >= stall_threshold`（連續客觀驗收失敗輪沒進展，不論推進/驗證模式） |
 | **震盪 A↔B** | 每輪都「修好一個」卻原地繞 | 最近 `osc_window` 輪的「失敗指紋」只在 ≤`osc_distinct_max` 種間循環，且有重複 |
 | **無活動(空轉)** | agent 連續多輪沒提交 | 「活動簽章」連續 `stall_threshold` 輪不變 |
 

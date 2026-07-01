@@ -85,7 +85,7 @@
 ### 3.2 調整任務收斂計數器 (Conv)
 - **增加任務收斂次數** (+1)：
   ```bash
-  {state_cli} task-conv --phase 1 --task TASK-01 --incr
+  {state_cli} --run-id "$LOOP_RUN_ID" --round "$LOOP_ROUND_NO" task-conv --phase 1 --task TASK-01 --incr
   ```
 - **重設任務收斂次數** (歸零)：
   ```bash
@@ -158,8 +158,9 @@ Issue 的狀態包括 `OPEN`、`RESOLVED`：
    - 使用 `issue-add` 時，Issue ID 全域不可重複。
 7. **一輪一任務配額限制**：
    - 當帶有非空的 `run_id` 與 `round` 時，在同一個 round 內僅能有一次實質任務推進（從 `TODO` ➔ `DRAFTED` 或從 `DRAFTED` ➔ `CONVERGED`），重複推進其他任務將被拒絕。
-8. **收斂自增防灌水限制**：
-   - `task-conv --incr` 會綁定當前「Phase + Git Commit」組成的進展簽章，禁止在簽章未變更（無實質程式碼變更或 commit）的情況下連續執行兩次自增。
+8. **收斂自增防灌水限制（兩道檢查皆須通過）**：
+   - **簽章檢查**：`task-conv --incr` 會綁定當前「Phase + Git Commit」組成的進展簽章，禁止在簽章未變更（無實質程式碼變更或 commit）的情況下連續執行兩次自增。
+   - **單回合配額**：即使簽章已因新 commit 而改變，同一個 `run_id#round` 仍最多只允許一次自增；若未提供 `round`，則退回為同一個 `run_id` 最多一次。`--reset` 會清空簽章，但不會清空本回合配額——同一輪內 reset 後再 `--incr` 仍會被配額擋下。任一檢查未通過都會直接失敗。
 9. **階段推進與跳級門檻**：
    - 階段變更 `current_phase` 不得跨多個階段跳躍（如直接從 1 設為 3）。
    - 當推進到相鄰下一階段（`before_phase + 1`）時，前一階段的所有任務必須皆已處於 `CONVERGED` 狀態，且全域 `BLOCKING` 類型之 Issue 數量必須為 0，否則會被拒絕。

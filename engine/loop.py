@@ -276,7 +276,12 @@ def update_stuck_state(cfg: dict, control: str, log_both, *, fail_fingerprints, 
     killed_streak = (as_int(progress.get("killed_streak")) + 1) if killed else 0
     no_activity = max(idle_rounds, killed_streak)
 
-    is_fail_verify = (not killed) and ("驗證" in mode) and (result == "FAIL")
+    # Any objective FAIL counts, regardless of mode (推進 or 驗證) — per
+    # oscillation-escalation.md:15 ("不論 last_round_mode 是「推進」或「驗證」").
+    # mode=驗證 only happens once a phase's tasks are ALL already CONVERGED
+    # (boot-sequence.md:67), so gating on it would make this structurally
+    # unreachable for the per-task RE-VERIFY oscillation this is meant to catch.
+    is_objective_fail = (not killed) and (result == "FAIL")
     stuck_level = as_int(get_val(control, "stuck_level"))
     rounds_since = as_int(get_val(control, "rounds_since_progress"))
     enhanced_used = as_int(get_val(control, "enhanced_rounds_used"))
@@ -290,7 +295,7 @@ def update_stuck_state(cfg: dict, control: str, log_both, *, fail_fingerprints, 
         stuck_level, enhanced_used = 0, 0
         set_val(control, "current_model_tier", model_tier_label(cfg, "execute", 0))
         set_human_required(control, False, run_id=cfg.get("run_id"), source="resume")
-    elif is_fail_verify:
+    elif is_objective_fail:
         rounds_since += 1
         fail_fingerprints.append(fail_fingerprint(control))
         if stuck_level == 1:
@@ -492,9 +497,9 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         model = select_model(cfg, "execute", stuck_level)
         tier = model_tier_label(cfg, "execute", stuck_level)
         # Rendered per-round (not hoisted above the loop) so the embedded
-        # state_cli carries this round's number — the one-task-per-round quota
-        # (state.py _record_task_progress_quota) keys off run_id+round, and
-        # run_id alone is constant for the whole multi-round run.
+        # state_cli carries this round's number: both task-status and
+        # task-conv quotas key off run_id+round, while run_id alone is
+        # constant for the whole multi-round execute loop.
         base_prompt = fmt_prompt(prompts.get("base", ""), control=control, framework=fw, run_id=run_id, round=i)
         escalation_prompt = fmt_prompt(prompts.get("escalation", ""), control=control, framework=fw, run_id=run_id, round=i)
         prompt = (_pending_revert_notice + "\n" if _pending_revert_notice else "") \
@@ -534,10 +539,10 @@ def _run_execute_locked(cfg: dict, lock_path: str | None = None) -> int:
         last_safe_sha = get_val(control, "last_safe_sha") or ""
         current_head = git_head()
         
-        # Oscillation fingerprint tracking
+        # Oscillation fingerprint tracking (any objective FAIL, not just mode=驗證 — see update_stuck_state)
         fail_fp = None
-        is_fail_verify = (not killed) and ("驗證" in mode) and (result == "FAIL")
-        if is_fail_verify:
+        is_objective_fail = (not killed) and (result == "FAIL")
+        if is_objective_fail:
             fail_fp = fail_fingerprint(control)
             
         append_round_record(cfg, {

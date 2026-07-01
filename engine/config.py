@@ -46,11 +46,11 @@ DEFAULTS = {
     },
     "extra_thresholds": {},
     "oscillation": {
-        "stall_threshold": 6,
-        "osc_window": 8,
-        "osc_distinct_max": 3,
-        "enhanced_max_rounds": 8,
-        "human_stop_after": 4,
+        "stall_threshold": 10,       # tier0->1 escalation threshold (was 6)
+        "osc_window": 8,             # fingerprint window shape, unchanged
+        "osc_distinct_max": 3,       # fingerprint window shape, unchanged
+        "enhanced_max_rounds": 10,   # tier1->2 escalation threshold (was 8)
+        "human_stop_after": 10,      # post-tier2 hard-stop buffer (was 4)
     },
     # min_unit and breaker config removed
     "runtime": {

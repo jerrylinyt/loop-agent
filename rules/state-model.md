@@ -84,3 +84,4 @@
 
 ### 5.6 收斂自增防灌水限制 (Conv Increment Restrictions)
 - **重複簽章防堵**：變更任務收斂計數器（`task-conv --incr`）時，會綁定當前「Phase + Git Commit」組成的進展簽章。在簽章未改變的情況下，禁止對同一任務連續執行兩次自增，以防收斂計數灌水。
+- **收斂計數單回合限額**：即使簽章因新 commit 而改變，系統仍會在 `control` 中記錄 `last_conv_progress_run_id`；當 CLI 帶有非空的 `run_id` 與 `round` 時，同一個 `run_id#round` 最多只允許一次 `conv +1`；若未提供 `round`，則退回為每個 `run_id` 最多一次。`--reset` 只會清空簽章，不會清空本回合配額。兩道檢查任一未通過，自增都會被拒絕。

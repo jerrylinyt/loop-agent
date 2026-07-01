@@ -57,7 +57,7 @@ STATIC_KEYS = {
     "human_required_msg", "human_required_since", "suggested_human_action",
     "human_required_source", "human_required_run_id",
     "review_invalid_streak", "last_safe_sha", "stop_condition_met", "blocking_issues",
-    "last_task_progress_run_id",
+    "last_task_progress_run_id", "last_conv_progress_run_id",
     "tree_enabled", "tree_root", "tree_total_nodes", "tree_total_leaves", "tree_max_depth",
     "plan_human_required", "plan_human_required_code", "plan_human_required_reason",
     "plan_human_required_msg", "plan_human_required_since", "plan_suggested_human_action",
@@ -128,6 +128,7 @@ def get_val_from_json_data(data: dict, key: str) -> str | None:
         "human_required_reason", "human_required_msg", "human_required_since",
         "suggested_human_action", "human_required_source", "human_required_run_id",
         "review_invalid_streak", "last_safe_sha", "last_task_progress_run_id",
+        "last_conv_progress_run_id",
         "stop_condition_met"
     }
     if key in control_keys:
@@ -208,6 +209,7 @@ def set_val_in_json_data(data: dict, key: str, value: str):
         "human_required_reason", "human_required_msg", "human_required_since",
         "suggested_human_action", "human_required_source", "human_required_run_id",
         "review_invalid_streak", "last_safe_sha", "last_task_progress_run_id",
+        "last_conv_progress_run_id",
         "stop_condition_met", "blocking_issues"
     }
     if key in control_keys:
@@ -503,12 +505,6 @@ def _changed_keys(before: dict, after: dict) -> list[str]:
     return changed
 
 
-def _cli_progress_signature(data: dict) -> str:
-    from git_utils import git_head
-
-    return f"{data.get('current_phase') or ''}|{git_head()}"
-
-
 def _record_task_progress_quota(
     data: dict, old_status: str, new_status: str, run_id: str | None, round_no: str | None = None
 ) -> None:
@@ -529,6 +525,27 @@ def _record_task_progress_quota(
     if last_quota_key == quota_key:
         raise ValueError("this run has already advanced one task; finish the round before progressing another task")
     control["last_task_progress_run_id"] = quota_key
+
+
+def _cli_progress_signature(data: dict) -> str:
+    from git_utils import git_head
+
+    return f"{data.get('current_phase') or ''}|{git_head()}"
+
+
+def _record_conv_progress_quota(data: dict, run_id: str | None, round_no: str | None = None) -> None:
+    if run_id and round_no:
+        quota_key = f"{run_id}#{round_no}"
+    elif run_id:
+        quota_key = run_id
+    else:
+        logger.warning("conv progress quota skipped because run_id is empty")
+        return
+    control = data.setdefault("control", {})
+    last_quota_key = str(control.get("last_conv_progress_run_id") or "")
+    if last_quota_key == quota_key:
+        raise ValueError("this run has already incremented conv once; finish the round before incrementing again")
+    control["last_conv_progress_run_id"] = quota_key
 
 
 def guarded_state_write(
@@ -631,10 +648,9 @@ def reconstruct_history_and_progress(cfg: dict, maxlen: int) -> tuple:
                             "last_pass": str(record.get("consecutive_pass") or 0)
                         }
                         
-                        mode = record.get("mode") or ""
                         result = record.get("result") or ""
-                        is_fail_verify = (not record.get("killed")) and ("驗證" in mode) and (result == "FAIL")
-                        if is_fail_verify:
+                        is_objective_fail = (not record.get("killed")) and (result == "FAIL")
+                        if is_objective_fail:
                             fp = record.get("fail_fingerprint")
                             if fp:
                                 dq.append(fp)
@@ -1407,6 +1423,7 @@ if __name__ == "__main__":
                         raise ValueError(
                             "conv unchanged: the same progress signature cannot increment twice without real progress"
                         )
+                    _record_conv_progress_quota(data, args.run_id, args.round)
                     live_task["conv"] = as_int(live_task.get("conv"), 0) + 1
                     live_task["last_conv_sig"] = sig
                 elif args.reset:

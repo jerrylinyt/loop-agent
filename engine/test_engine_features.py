@@ -19,19 +19,36 @@ from state import (
 )
 from run import reset_execute_state_data
 from utils import structured_preflight
+from loop import update_stuck_state
+from config import DEFAULTS
 
 
 STATE_PY = ROOT / "state.py"
 
 
-def run_state_cli(state_path: str, *args: str, env: dict | None = None):
+def run_state_cli(state_path: str, *args: str, env: dict | None = None, cwd: str | None = None):
     cmd = [sys.executable, str(STATE_PY), "--state", state_path, *args]
-    return subprocess.run(cmd, capture_output=True, text=True, env=env)
+    return subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=cwd)
 
 
 def write_state(path: str, data: dict):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
+
+
+def init_temp_git_repo(path: str) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True)
+    make_commit(path, "init")
+
+
+def make_commit(path: str, message: str) -> None:
+    marker = os.path.join(path, f"marker_{message}.txt")
+    with open(marker, "w", encoding="utf-8") as f:
+        f.write(message)
+    subprocess.run(["git", "add", "-A"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", message], cwd=path, check=True)
 
 
 def test_guarded_state_write_rejects_stale_revision():
@@ -112,25 +129,32 @@ def test_phase_gate_blocks_and_allows_forward_progress():
         assert "jump forward" in jumped.stderr
 
 
+def _write_conv_task_state(state_path: str) -> None:
+    write_state(state_path, {
+        "current_phase": "1",
+        "phases": [{
+            "id": "1",
+            "tasks": [{
+                "id": "TASK-01",
+                "status": "DRAFTED",
+                "conv": 0,
+                "threshold": 2,
+                "last_conv_sig": "",
+            }],
+        }],
+        "issues": [],
+        "control": {},
+    })
+
+
 def test_task_conv_rejects_duplicate_signature_and_reset_clears_it():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_path = os.path.join(tmpdir, "state.json")
-        write_state(state_path, {
-            "current_phase": "1",
-            "phases": [{
-                "id": "1",
-                "tasks": [{
-                    "id": "TASK-01",
-                    "status": "DRAFTED",
-                    "conv": 0,
-                    "threshold": 2,
-                    "last_conv_sig": "",
-                }],
-            }],
-            "issues": [],
-            "control": {},
-        })
+        _write_conv_task_state(state_path)
 
+        # No git repo here at all, so the phase+HEAD signature is constant
+        # ("1|") across calls -- this isolates the signature guard from the
+        # round quota (which needs --run-id/--round to engage at all).
         first = run_state_cli(state_path, "task-conv", "--phase", "1", "--task", "TASK-01", "--incr")
         second = run_state_cli(state_path, "task-conv", "--phase", "1", "--task", "TASK-01", "--incr")
         reset = run_state_cli(state_path, "task-conv", "--phase", "1", "--task", "TASK-01", "--reset")
@@ -140,6 +164,81 @@ def test_task_conv_rejects_duplicate_signature_and_reset_clears_it():
         assert second.returncode == 1
         assert "cannot increment twice" in second.stderr
         assert reset.returncode == 0
+        assert third.returncode == 0
+
+
+def test_task_conv_quota_is_one_per_round_even_after_a_new_commit():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_path = os.path.join(tmpdir, "state.json")
+        _write_conv_task_state(state_path)
+        init_temp_git_repo(tmpdir)
+
+        first = run_state_cli(
+            state_path, "--run-id", "same-run", "--round", "1",
+            "task-conv", "--phase", "1", "--task", "TASK-01", "--incr",
+            cwd=tmpdir,
+        )
+        # A genuine new commit lands mid-round (e.g. a git_guard safety
+        # commit) -- the phase+HEAD signature now differs, so only the
+        # round quota is left to catch a second increment in this round.
+        make_commit(tmpdir, "mid-round")
+        second = run_state_cli(
+            state_path, "--run-id", "same-run", "--round", "1",
+            "task-conv", "--phase", "1", "--task", "TASK-01", "--incr",
+            cwd=tmpdir,
+        )
+        reset = run_state_cli(
+            state_path, "--run-id", "same-run", "--round", "1",
+            "task-conv", "--phase", "1", "--task", "TASK-01", "--reset",
+            cwd=tmpdir,
+        )
+        third = run_state_cli(
+            state_path, "--run-id", "same-run", "--round", "1",
+            "task-conv", "--phase", "1", "--task", "TASK-01", "--incr",
+            cwd=tmpdir,
+        )
+        next_round = run_state_cli(
+            state_path, "--run-id", "same-run", "--round", "2",
+            "task-conv", "--phase", "1", "--task", "TASK-01", "--incr",
+            cwd=tmpdir,
+        )
+
+        assert first.returncode == 0
+        assert second.returncode == 1
+        assert "already incremented conv once" in second.stderr
+        assert reset.returncode == 0
+        # reset clears the signature guard, but not the round quota.
+        assert third.returncode == 1
+        assert "already incremented conv once" in third.stderr
+        assert next_round.returncode == 0
+
+
+def test_task_conv_quota_falls_back_to_per_run_id_without_round():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_path = os.path.join(tmpdir, "state.json")
+        _write_conv_task_state(state_path)
+        init_temp_git_repo(tmpdir)
+
+        first = run_state_cli(
+            state_path, "--run-id", "same-run",
+            "task-conv", "--phase", "1", "--task", "TASK-01", "--incr",
+            cwd=tmpdir,
+        )
+        make_commit(tmpdir, "between-attempts")
+        second = run_state_cli(
+            state_path, "--run-id", "same-run",
+            "task-conv", "--phase", "1", "--task", "TASK-01", "--incr",
+            cwd=tmpdir,
+        )
+        third = run_state_cli(
+            state_path, "--run-id", "new-run",
+            "task-conv", "--phase", "1", "--task", "TASK-01", "--incr",
+            cwd=tmpdir,
+        )
+
+        assert first.returncode == 0
+        assert second.returncode == 1
+        assert "already incremented conv once" in second.stderr
         assert third.returncode == 0
 
 
@@ -472,3 +571,82 @@ def test_append_run_finished_and_round_artifact():
         assert records[1]["type"] == "round_artifact"
         assert records[1]["changed_files"] == ["src/app.py"]
         assert records[1]["validation_status"] == "passed"
+
+
+def _minimal_osc_cfg(tmpdir: str) -> dict:
+    return {
+        "agent": {
+            "models": {"fast": "fast-model", "normal": "normal-model", "thinking": "thinking-model"},
+            "roles": {"execute": "fast"},
+        },
+        "oscillation": {
+            "stall_threshold": 3,
+            "osc_window": 4,
+            "osc_distinct_max": 2,
+            "enhanced_max_rounds": 2,
+            "human_stop_after": 2,
+        },
+        "run_id": "repo:default:1",
+    }
+
+
+def test_update_stuck_state_counts_objective_fail_regardless_of_mode():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        control_path = os.path.join(tmpdir, "state.json")
+        write_state(control_path, {"current_phase": "1", "control": {}})
+        cfg = _minimal_osc_cfg(tmpdir)
+
+        fail_fingerprints = []
+        upd = update_stuck_state(
+            cfg, control_path, lambda msg="": None,
+            fail_fingerprints=fail_fingerprints, progress={},
+            killed=False, mode="推進", result="FAIL", phase="1", cur_pass=0,
+        )
+
+        # Before the fix, mode=推進 FAILs were invisible to both signals.
+        assert upd["rounds_since"] == 1
+        assert len(fail_fingerprints) == 1
+
+
+def test_update_stuck_state_still_counts_verify_mode_fail():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        control_path = os.path.join(tmpdir, "state.json")
+        write_state(control_path, {"current_phase": "1", "control": {}})
+        cfg = _minimal_osc_cfg(tmpdir)
+
+        fail_fingerprints = []
+        upd = update_stuck_state(
+            cfg, control_path, lambda msg="": None,
+            fail_fingerprints=fail_fingerprints, progress={},
+            killed=False, mode="驗證", result="FAIL", phase="1", cur_pass=0,
+        )
+
+        assert upd["rounds_since"] == 1
+        assert len(fail_fingerprints) == 1
+
+
+def test_update_stuck_state_ignores_killed_round_regardless_of_mode():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        control_path = os.path.join(tmpdir, "state.json")
+        write_state(control_path, {"current_phase": "1", "control": {}})
+        cfg = _minimal_osc_cfg(tmpdir)
+
+        fail_fingerprints = []
+        upd = update_stuck_state(
+            cfg, control_path, lambda msg="": None,
+            fail_fingerprints=fail_fingerprints, progress={},
+            killed=True, mode="推進", result="FAIL", phase="1", cur_pass=0,
+        )
+
+        assert upd["rounds_since"] == 0
+        assert len(fail_fingerprints) == 0
+
+
+def test_oscillation_defaults_raised_to_ten_except_window_shape():
+    osc = DEFAULTS["oscillation"]
+    assert osc["stall_threshold"] == 10
+    assert osc["enhanced_max_rounds"] == 10
+    assert osc["human_stop_after"] == 10
+    # Fingerprint-window shape params are a different axis, left untouched.
+    assert osc["osc_window"] == 8
+    assert osc["osc_distinct_max"] == 3
