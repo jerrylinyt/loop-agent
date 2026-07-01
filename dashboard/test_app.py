@@ -789,3 +789,88 @@ def test_dashboard_reset_plan_endpoints(monkeypatch):
         r2 = client.post(f"/api/workspaces/{proj_id}/reset-plan")
         assert r2.status_code == 200
         assert r2.json() == {"status": "reset_and_planning"}
+
+
+def test_dashboard_reset_execute_endpoints(monkeypatch):
+    from fastapi.testclient import TestClient
+    from dashboard.app import app
+    import subprocess
+    import tempfile
+
+    popen_calls = []
+
+    def fake_popen(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return None
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_path = os.path.join(tmpdir, "my-repo")
+        os.makedirs(os.path.join(repo_path, ".loop", "default", ".loop_state"), exist_ok=True)
+
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("# Loop 專案總覽（自動維護）\n\n")
+            f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
+            f.write("|------|------|-----------|-------|-------|------|------|\n")
+            f.write(f"| my-repo | {repo_path} | default | 2 | 0 | tracked | t |\n")
+
+        monkeypatch.setattr("dashboard.app.get_index_path", lambda: index_path)
+
+        projects = parse_index()
+        proj_id = projects[0]["id"]
+
+        client = TestClient(app)
+
+        r1 = client.post(f"/api/projects/{proj_id}/reset-execute", json={})
+        assert r1.status_code == 200
+        assert r1.json()["status"] == "reset_execute_complete"
+
+        r2 = client.post(
+            f"/api/workspaces/{proj_id}/reset-execute",
+            json={"reset_to_phase": "2", "reset_to_task": "TASK-03"},
+        )
+        assert r2.status_code == 200
+        assert r2.json() == {
+            "status": "reset_execute_complete",
+            "reset_to_phase": "2",
+            "reset_to_task": "TASK-03",
+        }
+
+        assert len(popen_calls) == 2
+        first_cmd = popen_calls[0][0][0]
+        second_cmd = popen_calls[1][0][0]
+        assert "--stage" in first_cmd and "reset-execute-state" in first_cmd
+        assert "--reset-to-phase" in second_cmd and "2" in second_cmd
+        assert "--reset-to-task" in second_cmd and "TASK-03" in second_cmd
+
+
+def test_dashboard_reset_execute_rejects_task_without_phase(monkeypatch):
+    from fastapi.testclient import TestClient
+    from dashboard.app import app
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        index_path = os.path.join(tmpdir, "index.md")
+        repo_path = os.path.join(tmpdir, "my-repo")
+        os.makedirs(os.path.join(repo_path, ".loop", "default", ".loop_state"), exist_ok=True)
+
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("# Loop 專案總覽（自動維護）\n\n")
+            f.write("| 專案 | repo | workspace | phase | stuck | 狀態 | 更新 |\n")
+            f.write("|------|------|-----------|-------|-------|------|------|\n")
+            f.write(f"| my-repo | {repo_path} | default | 2 | 0 | tracked | t |\n")
+
+        monkeypatch.setattr("dashboard.app.get_index_path", lambda: index_path)
+
+        projects = parse_index()
+        proj_id = projects[0]["id"]
+
+        client = TestClient(app)
+        r = client.post(
+            f"/api/workspaces/{proj_id}/reset-execute",
+            json={"reset_to_task": "TASK-03"},
+        )
+        assert r.status_code == 400
+        assert r.json()["detail"] == "reset_to_task requires reset_to_phase"

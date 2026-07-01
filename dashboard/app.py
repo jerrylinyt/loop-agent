@@ -81,6 +81,11 @@ class RejectRequest(BaseModel):
     subtree_id: str
 
 
+class ExecuteResetRequest(BaseModel):
+    reset_to_phase: Optional[str] = None
+    reset_to_task: Optional[str] = None
+
+
 # Helper Functions
 def get_index_path():
     return os.path.expanduser("~/.loop/index.md")
@@ -655,6 +660,10 @@ def reject_workspace_node(id: str, req: RejectRequest):
 @app.post("/api/workspaces/{id}/reset-plan")
 def reset_workspace_plan(id: str):
     return reset_project_plan(id)
+
+@app.post("/api/workspaces/{id}/reset-execute")
+def reset_workspace_execute(id: str, req: ExecuteResetRequest):
+    return reset_project_execute(id, req)
 
 @app.get("/api/workspaces/{id}/timeline")
 def get_workspace_timeline(id: str, limit: int = 100):
@@ -1501,6 +1510,46 @@ def reset_project_plan(proj_id: str):
                 stderr=f_out
             )
         return {"status": "reset_and_planning"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{proj_id}/reset-execute")
+def reset_project_execute(proj_id: str, req: ExecuteResetRequest):
+    proj = get_project_by_id(proj_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if proj["is_running"]:
+        raise HTTPException(status_code=400, detail="Cannot reset execute state while project is running. Stop it first.")
+
+    if req.reset_to_task and not req.reset_to_phase:
+        raise HTTPException(status_code=400, detail="reset_to_task requires reset_to_phase")
+
+    framework_dir = os.path.dirname(HERE)
+    run_py = os.path.join(framework_dir, "engine", "run.py")
+    cmd = [sys.executable, run_py, "--workspace", proj["workspace"], "--stage", "reset-execute-state"]
+    if req.reset_to_phase:
+        cmd.extend(["--reset-to-phase", req.reset_to_phase])
+    if req.reset_to_task:
+        cmd.extend(["--reset-to-task", req.reset_to_task])
+
+    try:
+        state_dir = os.path.join(proj["repo"], ".loop", proj["workspace"], ".loop_state")
+        os.makedirs(state_dir, exist_ok=True)
+        spawn_log_path = os.path.join(state_dir, "spawn.log")
+        with open(spawn_log_path, "a", encoding="utf-8") as f_out:
+            subprocess.Popen(
+                cmd,
+                cwd=proj["repo"],
+                stdout=f_out,
+                stderr=f_out
+            )
+        return {
+            "status": "reset_execute_complete",
+            "reset_to_phase": req.reset_to_phase or "",
+            "reset_to_task": req.reset_to_task or "",
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

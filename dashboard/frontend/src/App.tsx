@@ -424,6 +424,50 @@ export default function App() {
     }
   }
 
+  const handleResetExecute = async (id: string) => {
+    if (!confirm("Reset execute-state for this workspace? This keeps the generated plan, but rewinds execution progress so the agent can run again from the selected point.")) return
+
+    const rawPhase = prompt("Optional: reset from which phase? Leave blank to reset all execute progress.", "")
+    if (rawPhase === null) return
+    const resetToPhase = rawPhase.trim()
+
+    let resetToTask = ''
+    if (resetToPhase) {
+      const rawTask = prompt("Optional: reset from which task inside that phase? Leave blank to reset the whole phase onward.", "")
+      if (rawTask === null) return
+      resetToTask = rawTask.trim()
+    }
+
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/workspaces/${id}/reset-execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reset_to_phase: resetToPhase || null,
+          reset_to_task: resetToTask || null
+        })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const scope = data.reset_to_task
+          ? `phase ${data.reset_to_phase}, task ${data.reset_to_task}`
+          : data.reset_to_phase
+            ? `phase ${data.reset_to_phase}`
+            : 'the beginning'
+        flashSuccess(`Execution state reset from ${scope}. Start the engine again when you're ready.`)
+        fetchWorkspaces()
+      } else {
+        const error = await res.json()
+        flashError(error.detail || "Failed to reset execute state")
+      }
+    } catch (e) {
+      flashError("Network connection error")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleUntrack = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!confirm("Remove this workspace from the Dashboard track index? This does not delete any files on your disk.")) return
@@ -854,15 +898,26 @@ export default function App() {
                 )}
 
                 {activeWorkspace?.status !== 'running' && (
-                  <button 
-                    onClick={() => handleResetPlan(activeWorkspace!.id)}
-                    disabled={loading}
-                    className="flex items-center space-x-1.5 px-3 py-2 bg-slate-850 hover:bg-slate-800 disabled:opacity-50 text-slate-300 hover:text-white rounded-lg text-sm font-semibold border border-slate-700 transition-colors"
-                    title="Reset planning progress and restart planning"
-                  >
-                    <RotateCcw className="h-4 w-4 text-slate-400" />
-                    <span>Reset Plan</span>
-                  </button>
+                  <>
+                    <button 
+                      onClick={() => handleResetExecute(activeWorkspace!.id)}
+                      disabled={loading}
+                      className="flex items-center space-x-1.5 px-3 py-2 bg-slate-850 hover:bg-slate-800 disabled:opacity-50 text-slate-300 hover:text-white rounded-lg text-sm font-semibold border border-slate-700 transition-colors"
+                      title="Reset execute-state and keep the generated plan"
+                    >
+                      <RotateCcw className="h-4 w-4 text-slate-400" />
+                      <span>Reset Execute</span>
+                    </button>
+                    <button 
+                      onClick={() => handleResetPlan(activeWorkspace!.id)}
+                      disabled={loading}
+                      className="flex items-center space-x-1.5 px-3 py-2 bg-slate-850 hover:bg-slate-800 disabled:opacity-50 text-slate-300 hover:text-white rounded-lg text-sm font-semibold border border-slate-700 transition-colors"
+                      title="Reset planning progress and restart planning"
+                    >
+                      <RotateCcw className="h-4 w-4 text-slate-400" />
+                      <span>Reset Plan</span>
+                    </button>
+                  </>
                 )}
               </div>
             </div>

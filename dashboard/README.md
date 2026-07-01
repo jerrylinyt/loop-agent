@@ -104,6 +104,7 @@ Dashboard 本身**不存任何狀態**，所有資訊都即時讀自檔案系統
 | 規劃樹地圖 | 樹模式下，解析 state.json 的規劃節點樹 | `GET /api/workspaces/{id}/tree` |
 | 退回子樹重規劃 | 針對特定子樹節點發送 Reject，觸發引擎重新規劃 | `POST /api/workspaces/{id}/reject` |
 | 重設規劃 | 清除 state.json 中的 plan/phases 與 phases/*.md 檔案，重啟規劃迴圈 | `POST /api/workspaces/{id}/reset-plan` |
+| 重設執行狀態 | 保留規劃書，只重置 execute-state；可選擇從指定 phase/task 往後重跑 | `POST /api/workspaces/{id}/reset-execute` |
 | 取得活動時間軸 | 回傳解析 `rounds.jsonl` 與 state.json 後的 typed events | `GET /api/workspaces/{id}/timeline` |
 | 取得圖表資料 | 取得歷史 Rounds 執行結果 (PASS/FAIL、模型等級、停滯度) | `GET /api/workspaces/{id}/progress` |
 | 即時日誌串流 | SSE 即時串流 loop / plan log，支援載入最後 500 行歷史 | `GET /api/workspaces/{id}/logs/{log_type}` |
