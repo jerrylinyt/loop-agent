@@ -42,6 +42,11 @@
 | registry.json（+owner） | 引擎 update_index | dashboard fleet | analyze/collect 發現 workspace | 否 |
 | docs/errors.md | 框架文件 | 通知/RUN_REPORT 錨點連結 | CI 防漏測試 | 否 |
 | INTERVIEW.md | `loop init`（樣板代入） | dashboard 精靈顯示對應啟動指令 | 使用者的 agent CLI 於訪談時讀取 | 僅訪談 session |
+| `.loop_state/notify_queue.jsonl` | 引擎（靜音時段緩存，docs#2 T15） | digest 通知內容 | 引擎出靜音後 flush；`loop status/report` 檢查 | 否（append-only，flush 後清空） |
+| `.loop_state/state_archive.jsonl` | 引擎壓實（docs#3 T2） | 事後稽核（人工） | — | 否（append-only，只寫不讀） |
+| `~/.loop/analytics/estimation-history.jsonl` | 引擎 run 完成時（docs#5 T6） | analyze 報告 | PLAN_SUMMARY 估算校正係數 | 否 |
+| `~/.loop/dashboard-audit.jsonl` | dashboard 動作執行器（dashboard#2 T1） | 操作稽核（人工/團隊） | — | 否（append-only） |
+| presets/（任務型範本） | 框架文件（docs#2 T16 1-b） | `loop init --preset` 起步 | analyze --suggest 的校準建議寫入其門檻註解段（docs#5 T4） | 否（僅 init 時拷貝進 REQUIREMENTS） |
 | lessons.md（未來 H1.3） | 人審入庫 | dashboard | 任務卡命中注入 ≤5 條 | 命中時 |
 
 ## C. 跨計畫增補帳（Amendments Ledger）
@@ -52,13 +57,16 @@
 |---|--------|-------------|------|------|
 | L1 | dashboard#1 T5/驗收 | docs#4 M2.2 | 任務卡另存 `.loop_state/cards/R{n}.md`（dashboard 單輪詳情的 prompt 來源） | 待納入 docs#4 實作 |
 | L2 | dashboard#4 T1 | docs#5 T1 | registry.json schema 增 `owner` 欄位 | 待納入 docs#5 實作 |
-| L3 | docs#5 T1 | docs#4 M2.3 | round_finished 補 `task/action/verify_kind/model` 欄位（任務級歸因） | 已寫入兩書，實作時對齊欄位名 |
+| L3 | docs#5 T1 | docs#4 M2.3 | 任務歸因欄位（round_finished 的 task/action/verify_kind/model、review_revert 的 round/task、task_frozen/phase_advanced 事件） | **規格主體已補進 docs#4 M2.3 第 4 點（實作點）**；docs#5 T1 為消費/驗證方，欄位名以 M2.3 為準 |
 | L4 | dashboard#2 T3 | —（僅引用） | dashboard 代跑 acceptance-standards §6 機械核對（不改該檔） | 無需動作 |
 | L5 | 本表 | docs#4 M5 | plan/plan_gate prompt 檔名引用同步 + CI 參照完整性測試 | 已補進 docs#4 M5 第 8 點 |
 | L6 | 本表 | docs#4 M4 | L1 review prompt 帶本輪上下文摘要 | 已補進 docs#4 M4 |
 | L7 | dashboard#1 T1 | docs#2 T2 | `loop dashboard` 子命令插槽（參數透傳） | 已補進 docs#2 T2 表 |
 | L8 | 收官重審 | docs#1 T13b | loop.py stop_requested 誤標 broken_control_file（B11） | 已補進 docs#1 |
 | L9 | dashboard#2 T6-b | docs#2 T2/T3 | init 生成 INTERVIEW.md + 印訪談指令；profile 增 `interactive_cmd` 欄位（dashboard 與 CLI 共用同一組裝函式） | 已補進 docs#2 |
+| L10 | code-review 收官 | docs#3 T7 ↔ docs#4 M4 | 引擎自產 commit 規約（`loop-engine(<類別>):` 前綴＋路徑白名單→gate 豁免）；M4 改寫規則檔時規約必須隨遷 | 已補進兩書 |
+| L11 | code-review 收官 | docs#2 T16 1-b ↔ docs#5 T4 | 任務型 preset（presets/ 目錄 + `loop init --preset`）；analyze 校準寫給 preset 門檻段、不碰 CLI profile | 已補進兩書 |
+| L12 | code-review 收官 | docs#2 T7、docs#4 M2.1/M2.3 | dashboard 事件標記層的三種資料源：note_injected（docs#2 T7）、phase_advanced / task_frozen（docs#4） | 已補進對應書 |
 
 ## D. 執行 agent 的自查（每本計畫書收 PR 前）
 

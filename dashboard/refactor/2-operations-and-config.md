@@ -47,7 +47,8 @@
 
 **規格**：
 1. Config 籤兩種模式：
-   - **表單模式（預設）**：只暴露白名單旋鈕，schema 驅動渲染（數字/enum/bool + 每欄位說明文案與框架預設值對照）：`generation.mode`、各 `oscillation.*`、`runtime.max_rounds / max_wall_seconds / interval_seconds / *_timeout_seconds / notify_cmd / notify_quiet_hours / heartbeat_url / parallel_slots(未來)`、`agent.models.*`、`phases[].converge_threshold`。
+   - **表單模式（預設）**：只暴露白名單旋鈕，schema 驅動渲染（數字/enum/bool + 每欄位說明文案與框架預設值對照）：`generation.mode`、各 `oscillation.*`、`runtime.max_rounds / max_wall_seconds / interval_seconds / *_timeout_seconds / notify_cmd / notify_quiet_hours / heartbeat_url / parallel_slots(未來)`、`agent.models.*`。
+     ⚠️ `phases[].converge_threshold` **不進可編輯表單**：執行期門檻的單一事實來源是 state 內的 per-task threshold（docs/refactor 計畫書 1 T8 的裁決），config 的該欄只是 plan 期預設——在 Plan 籤以唯讀顯示 per-task 門檻＋一行說明「要改門檻請走 reset-plan/replan」，避免使用者改了 config 卻靜默無效。
    - **原始 YAML 模式**：整檔編輯器（唯讀警示條：「進階；表單外欄位後果自負」）。
 2. **存檔管線（三道欄）**：
    a. 後端以 `load_config` 實際載入合併結果做 schema/型別驗證 + 跑 `run.py --preflight --json`（不啟動），錯誤原樣顯示、拒存；

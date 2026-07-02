@@ -32,8 +32,8 @@
 - workspace 發現靠 parse `~/.loop/index.md` 的 markdown 表格（`collect_traces.py:22-53`），脆弱且欄位有限。
 
 **變更規格**：
-1. **round record 補欄位**（掛進計畫書 4 M2.3 的引擎收尾處；若本計畫先於 4 的某里程碑執行，以 orchestrator 落地後的記錄點為準）：
-   - `task`（本輪任務 id；PHASE_VALIDATE / check 輪填 null + `phase` 照舊）、`action`（DRAFT/FIX/REVERIFY/ENUMERATE/RUN_CHECK/PHASE_VALIDATE）、`verify_kind`、`model`（實際模型名，補 tier 之外的具體值）。
+1. **round record 欄位（規格主體在計畫書 4 M2.3 第 4 點，本任務為消費/驗證方）**：
+   - `round_finished` 的 `task`/`action`/`verify_kind`/`model`、`review_revert` 的 `round`/`task`、`task_frozen`/`phase_advanced`/`note_injected` 事件 record——皆由計畫書 4（與計畫書 2 T7）實作；本任務驗證欄位齊全性（analytics loader 對缺欄位 record 的容錯 + 統計時標記資料版本），並確保欄位名與 M2.3 完全一致（欄位名以 M2.3 為準）。
 2. **機器可讀 registry**：`~/.loop/registry.json`（`config.index` 同目錄）：
    ```jsonc
    { "version": 1, "workspaces": [{
@@ -87,7 +87,7 @@
 1. `loop analyze --all`：遍歷 registry 全部 workspace，輸出 `~/.loop/analytics/<date>/cross-summary.md` + `.json`：
    - 各 workspace 一行總覽（輪數/時長/完成率/平均任務成本/估算準度比值）。
    - **框架預設值體檢**：把 T5 的校準規則跑在「全體資料」上，產出對 `engine/config.py DEFAULTS` 的建議（例：全體 reverify 實質差異率 2% → 建議預設 converge_threshold 由 2 降 1 並說明風險）。
-   - 任務型聚類（依 verify_kind × phase 名稱關鍵字粗分類），供 preset（計畫書 2 T3 的任務型範本）校準。
+   - 任務型聚類（依 verify_kind × phase 名稱關鍵字粗分類），供任務型 preset（**計畫書 2 T16 第 1-b 點的 `presets/` 目錄**）校準——校準建議寫給各 preset 的建議門檻註解段，❌ 不碰 CLI profile（profiles/ 是 CLI/模型設定，與任務型無關）。
 2. 與 collect_traces 的關係：`loop analyze --all --collect` 順手呼叫 collect_traces 產 snapshot/summary（同一日期目錄旁），一次指令餵飽 maintenance 迴圈。
 
 **驗收**：兩個 fixture workspace 下 `--all` 產出 cross-summary 且逐 workspace 數字與單獨 analyze 一致；`--collect` 產生 trace-snapshots。

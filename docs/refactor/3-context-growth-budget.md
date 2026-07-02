@@ -12,7 +12,7 @@
 | # | 增長源 | 誰會讀到 | 現況防護 | 判定 |
 |---|--------|----------|----------|------|
 | G1 | `state.json` | **agent 每輪 STEP 0 全讀**；引擎每輪多次 parse | `control_max_bytes: 60000` 與 `journal_in_control_keep` **定義了但引擎全程沒用（死設定）**；`reset_history` 無上限 append（run.py:168）；resolved issues 留在索引 | ❌ 未執法 |
-| G2 | Review Gate prompt | **每輪把「完整 state.json 內容 + 完整 diff」內嵌進 prompt**（loop.py:123-140） | 無任何上限——state 越大、diff 越大，審查輪 context 越肥，弱模型審查品質越差 | ❌ 未執法，**最大的單點** |
+| G2 | Review Gate 審查輪的 context | prompt 本身很小（`git_review` 樣板無 `{diff_content}`/`{state_json_content}` 佔位符——loop.py:132-140 傳入的這兩個 kwargs 是**死參數**，fmt_prompt 只替換樣板中存在的佔位符）；但樣板指示審查 agent **自行整檔讀 state.json 並自跑完整 diff**——增長發生在 agent 側讀取，不在 prompt | 無上限：state 越大、diff 越大，審查 agent 自己讀進 context 的量越肥；另有死 kwargs＋誤導註解（loop.py:133「實質提供完整 diff」、rules/git-review-gate.md:18「你會看到 state.json 完整內容」——都與實況不符） | ❌ 未執法（agent 側） |
 | G3 | `rounds.jsonl` / `state_events.jsonl` | 引擎啟動整檔逐行 parse（state.py:627）；dashboard/collect_traces 讀 | append-only、**無輪替**；長專案數萬行後啟動變慢；不進 agent context（在 .loop_state，gitignore） | ⚠️ 引擎效能問題，非 context 問題 |
 | G4 | 證據檔 `.reverify/ .enum/ .validate/` | 進版控、進 Review Gate 的 diff；正常不被執行 agent 回讀 | 每輪新增、永不清理；單檔長度無上限（agent 可能貼整包 build log） | ❌ 未執法 |
 | G5 | `loop.log` / `plan.log` | 規則禁止 agent 讀；人用 | rotation 已有（50MB×5）✅ | ✅ 已治理 |
@@ -48,30 +48,30 @@
    - 任務物件裡若存在歷史性陣列欄位（如未來的 `revert_history` / `evidence` 清單）：保留最近 `converge_threshold` 筆，其餘搬 archive。
    - **絕不動**：phases 結構、任務 status/conv、control 運行欄位、requirements_map（都是決策必需）。
 2. 呼叫點：T1 的超限路徑 + `finish()` 收工時例行執行一次（run 結束順手瘦身）。
-3. 壓實屬引擎寫入，走 `guarded_state_write` 的引擎 source，事後 git commit（`chore: compact state.json`）——在 run_branch 上，無污染顧慮。
+3. 壓實屬引擎寫入，走 `guarded_state_write` 的引擎 source，事後 git commit——**commit 訊息與豁免依 T7 引擎自產 commit 規約**（否則壓實刪欄位的 diff 正中 review 紅線 2/4 的 REVERT 靶心，會形成 compact→revert→state_too_large 死循環）。
 4. `run.py` 的 `reset_execute_state_data` 中 `reset_history` append 處同步加「留 5 筆」上限（源頭節流）。
 
 **驗收**：新測試 `test_compact_moves_resolved_issues_and_reset_history`、`test_compact_preserves_decision_fields`（壓實前後 `is_done` / task 狀態判定完全一致）。
 
-## T3｜Review Gate prompt 內嵌上限（G2，最高優先）
+## T3｜Review Gate 審查輪的 context 治理（G2）
 
-**現況**：`loop.py run_git_review_gate` 把 `diff`（完整 `git diff last_safe..HEAD` 輸出）與 `state_json_content`（完整 state.json）字串直接代入 prompt。大 diff 輪（如 autocommit 補了一堆檔）prompt 可達數百 KB——弱模型直接被淹死，審查品質崩潰還照樣收錢。
+**現況（收官重審後校正——原版本的前提是錯的）**：
+- prompt 本身**沒有**內嵌完整 diff / state.json：`engine/prompts.yaml` 的 `git_review` 樣板只有 `{diff_range}`/`{control}`/`{result_file}` 佔位符；`loop.py:132-140` 傳入的 `diff_content` / `state_json_content` 兩個 kwargs 因樣板無對應佔位符而是**死參數**（`fmt_prompt` 只替換存在的佔位符）。
+- 真正的增長在 **agent 側**：樣板指示審查 agent「自行執行 `{diff_range}`」「讀取 `{control}`（整檔 state.json）」——state 與 diff 越大，審查 agent 自己讀進 context 的量越肥，且完全沒有預算指引。
+- 附帶兩處**誤導性殘留**會坑到未來維護者：`loop.py:133` 註解「實質提供完整 diff 供獨立審查」、`rules/git-review-gate.md:18`「你現在不只會看到 Diff，還會看到最新的 state.json 狀態檔完整內容」——皆與實況不符。
 
 **變更規格**：
-1. config 新增 `runtime.review_embed_max_bytes: 30000`。
-2. **diff 內嵌改為「導覽 + 截斷」**：
-   - prompt 內嵌 `git diff --stat last_safe..HEAD` 全文（stat 很小）+ diff 本文**前 `review_embed_max_bytes` bytes**，截斷處插入明確標記：`…（diff 已截斷，完整內容請自行執行：{diff_range}）`。
-   - `git-review-gate.md` 已指示審查 agent「使用工具獲取 diff」（rule :36-38），prompt 樣板同步強化：「內嵌內容僅供導覽，**逐項審查必須以你自己執行 `{diff_range}` 的輸出為準**」。
-3. **state.json 內嵌改為「引擎生成的摘要 + 狀態 diff」**：
-   - 移除 `state_json_content` 整檔內嵌。
-   - 改嵌兩樣：(a) `state.py` 新函式 `summarize_for_review(state) -> str`（≤ 2KB：current_phase、各 phase 任務狀態計數、各計數器值、OPEN issues 索引行）；(b) `git diff last_safe..HEAD -- <state.json路徑>` 的輸出（**本輪狀態變更才是審查對象**，全文通常很小；同樣受 max_bytes 截斷保護）。
-   - 審查紅線需要完整 state 時（如結構毀損判定），agent 自行讀檔——rule 補一句指引。
-4. `prompts.yaml` 的 `git_review` 樣板與 `rules/git-review-gate.md` 同步更新措辭。
+1. **清死碼**：移除 `run_git_review_gate` 中傳入 `fmt_prompt` 的 `diff_content` / `state_json_content` 死 kwargs 與 loop.py:133 誤導註解；`rules/git-review-gate.md:18` 措辭改為與實況一致。
+2. **給審查 agent 有預算的輸入（正向改善，取代放任自讀）**：
+   - config 新增 `runtime.review_embed_max_bytes: 30000`。
+   - prompt **實際內嵌**（樣板新增佔位符）：(a) `git diff --stat last_safe..HEAD` 全文（很小）；(b) `state.py` 新函式 `summarize_for_review(state) -> str`（≤2KB：current_phase、各 phase 任務狀態計數、計數器、OPEN issues 索引行）；(c) `git diff last_safe..HEAD -- <state.json>` 輸出（**本輪狀態變更才是審查對象**，通常很小）。三者合計受 `review_embed_max_bytes` 截斷保護（截斷處插入明確標記與自查指令）。
+   - 樣板指引改為：「diff 逐項審查以你自行執行 `{diff_range}` 的輸出為準、**分段檢視、單檔過大先看 stat 挑重點**；state 審查以上方內嵌的摘要與狀態 diff 為準，僅在懷疑結構毀損時才整檔讀 state.json」——把「怎麼有預算地讀」寫成明確指令，而不是放任整檔吞。
+3. `rules/git-review-gate.md` 同步更新措辭（含第 2 節「你會看到」段）。
 
 **驗收**：
-- 新測試 `test_review_prompt_capped`（構造 200KB diff，斷言組出的 prompt 長度 < 60KB 且含截斷標記與 stat）。
-- 新測試 `test_review_prompt_embeds_state_diff_not_full_state`。
-- 手動：跑一輪真實 review，log 中 `[Git Review Prompt]` 長度肉眼確認在預算內。
+- 新測試 `test_review_prompt_no_dead_kwargs`（樣板佔位符集合與 fmt_prompt 傳入 kwargs 集合一致——防死參數重生，兼防「佔位符加了 kwargs 忘傳」的反向錯）。
+- 新測試 `test_review_prompt_embeds_stat_summary_and_state_diff`（斷言三樣內嵌存在、200KB diff fixture 下 prompt 總長受 max_bytes 截斷且含標記）。
+- 手動：跑一輪真實 review，確認審查 agent 依指引取 diff/state（log 可見其指令），未整檔讀 state.json（非毀損情境）。
 
 ## T4｜rounds.jsonl / state_events.jsonl 輪替與尾讀（G3）
 
@@ -95,7 +95,7 @@
    - 規則：對每個任務的 `.reverify/<task>-R###.md` 依 R### 排序，**保留最新 `converge_threshold` 份**，其餘刪除；`.enum/`、`.validate/` 同規則（validate 以 phase 為 key，保留最新 `final_phase_pass_gte` 份）。
    - 刪除以 `git rm` + 單獨 commit `chore: prune stale evidence files (phase N)`。
    - **修剪不可動 OPEN issue 引用的證據**：掃 state issues 索引中 OPEN 項的關聯檔，跳過。
-3. Review Gate 對「修剪 commit」的相容：這是引擎產的 commit，會落在下一輪 review 的 diff 範圍。`git-review-gate.md` 紅線 8（無故刪檔）補豁免句：「commit message 為 `chore: prune stale evidence files` 且只刪 `.reverify/.enum/.validate` 底下檔案者，屬引擎例行修剪，不算無故刪檔。」
+3. Review Gate 對「修剪 commit」的相容：**依 T7 引擎自產 commit 規約**（prune 類）豁免，不再於規則檔寫個案豁免句。
 
 **驗收**：新測試 `test_prune_keeps_threshold_latest`、`test_prune_skips_open_issue_evidence`；手動：fixture repo 累積 10 輪證據後過 gate，舊證據被移除且 commit 訊息正確。
 
@@ -110,13 +110,27 @@
 
 **驗收**：新測試 `test_round_record_has_context_telemetry`；collect_traces 對 fixture 輸出含新聚合欄位。
 
+## T7｜引擎自產 commit 規約（與 Review Gate 的互認，收官重審新增）
+
+**動機**：本系列讓引擎自己會產 commit（T2 壓實、T5 修剪、計畫書 1 T6 的框架同步、reset 類），這些 commit 會落在下一輪 review 的 `last_safe..HEAD` diff 範圍——壓實刪 state 欄位、修剪刪證據檔，**正中現行紅線 2/4/8 的 REVERT 靶心**。散在各任務寫個案豁免會漏（計畫書 4 M4 改寫規則檔時就會遺失），需要一條統一規約。
+
+**變更規格**：
+1. **訊息前綴**：所有引擎自產 commit 訊息一律 `loop-engine(<類別>): <摘要>`，類別枚舉：`compact` / `prune` / `sync` / `reset`。
+2. **路徑白名單**（每類允許觸碰的範圍）：`compact` → 僅 state.json；`prune` → 僅 `.reverify/.enum/.validate/` 刪檔；`sync` → 僅 `.loop/rules|generators/`；`reset` → state.json + phases/。
+3. **Review Gate 端的互認（引擎層實作，非 LLM 判斷）**：gate 取 diff 前先列出 range 內 commits，凡「訊息帶規約前綴 **且** 該 commit 的 diff 完全落在對應路徑白名單內」者從審查範圍排除（逐 commit 驗路徑，**前綴對但路徑越界 → 不豁免、照審**——防 agent 偽造前綴夾帶）；排除後若剩餘 diff 為空 → 直接 PASS 並前移 last_safe_sha。
+4. 計畫書 4 M4 落地時，此規約併入 L0 實作（見該書 M4 的引擎 commit 豁免列）；13 項版規則檔過渡期由本任務在引擎層實作同邏輯（不改規則檔文字，機制在 gate 取 diff 前）。
+5. 明確排除：agent 的 commit（`R### | phase…` 格式）永不適用豁免，即使觸碰相同路徑。
+
+**驗收**：新測試 `test_engine_commit_exempted_from_review`（compact commit 在 range 內 → 不觸發 LLM review 且 last_safe 前移）、`test_forged_prefix_with_out_of_scope_paths_not_exempted`、`test_agent_commit_never_exempted`。
+
 ---
 
 ## 最終驗收清單
 
 - [ ] `grep -n "journal_in_control_keep" engine/ generators/` 零筆（死設定已移除）
 - [ ] `control_max_bytes` 有真實執法路徑（測試證明 80% warning、100% 壓實→停機）
-- [ ] Review Gate prompt 在 200KB diff fixture 下 < 60KB（測試 + 手動 log 確認）
+- [ ] Review prompt 死 kwargs 清除（佔位符/kwargs 一致性測試綠）；stat+摘要+state diff 三樣內嵌存在且受 max_bytes 截斷（200KB diff fixture）
+- [ ] 引擎自產 commit（compact/prune/sync）經 T7 規約被 gate 正確豁免；偽造前綴夾帶越界路徑不豁免（測試綠）
 - [ ] 10k 行 rounds.jsonl 下引擎啟動的重建耗時 < 0.1s（尾讀生效；加簡單計時斷言或手動驗證）
 - [ ] 證據檔修剪在 phase gate / complete 觸發，保留數符合門檻，OPEN issue 證據不動
 - [ ] `pytest engine/` 全綠，本計畫新增測試 ≥ 12 個

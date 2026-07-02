@@ -70,22 +70,23 @@ revert_res.returncode != 0:
 
 ## T5｜修 B5：失敗指紋改用「本輪 commit 的實際 diff」
 
-**現況**：`engine/utils.py` :358-362 `fail_fingerprint()` 用 `changed_files()`（working tree dirty 檔案）。agent 正常於 STEP C commit 後 working tree 乾淨 → 指紋退化成只剩 fail_tasks，震盪偵測解析度下降。
+**現況（收官重審後校正）**：`engine/utils.py` :358-362 `fail_fingerprint()` 用 `changed_files()`——實際是 `git diff --name-only HEAD~1 HEAD`（**最後一個 commit** 的檔案清單，git_utils.py:21-30），不是 working tree dirty 檔案。真正的缺陷有二：(a) 只涵蓋最新**一個** commit——本輪若有多個 commit（agent commit + git_guard autocommit）只算到最後一個；(b) 本輪 agent **沒有** commit 時，拿到的是**上一輪**commit 的檔案清單——指紋張冠李戴，震盪偵測被污染。
 
 **變更規格**：
 - `fail_fingerprint(control, changed: list[str])` 增加參數：改動檔案清單由呼叫端提供。
-- `engine/loop.py` 兩個呼叫點（`update_stuck_state` 內 append、round record 的 `fail_fp`）改傳 `changed_files_between(git_head_before, current_head)` 的結果（該輪實際 commit diff；此值本輪已算過，重用變數、不要重跑 git）。
+- `engine/loop.py` 兩個呼叫點（`update_stuck_state` 內 append、round record 的 `fail_fp`）改傳 `changed_files_between(git_head_before, current_head)` 的結果（**本輪起訖 HEAD 的實際 diff**，涵蓋本輪全部 commits；本輪無 commit 時為空清單，不再沿用上一輪；此值本輪已算過，重用變數、不要重跑 git）。
 - `reconstruct_history_and_progress` 不受影響（讀的是已存的 fingerprint 字串）。
 
-**驗收**：新測試 `test_fail_fingerprint_uses_commit_diff`：兩輪 fail_tasks 相同、commit diff 檔案不同時，指紋不同；working tree 乾淨時指紋仍含檔案成分。
+**驗收**：新測試 `test_fail_fingerprint_uses_round_range_diff`（兩輪 fail_tasks 相同、本輪 diff 檔案不同 → 指紋不同）、`test_fail_fingerprint_empty_when_no_commit_this_round`（本輪無 commit → 檔案成分為空，不得等於上一輪指紋）、`test_fail_fingerprint_covers_multi_commit_round`（agent commit + autocommit 兩個 commit 的檔案都入指紋）。
 
 ## T6｜修 B7：sync_framework_docs 移出每輪迴圈
 
 **現況**：`loop.py` :458、`plan_loop.py` :191 每輪呼叫 `sync_framework_docs`，同步 + 自動 commit 發生在 Review Gate 取 diff 之前，導致框架文件 commit 混進「上一輪未審 diff」，且污染一輪一 commit 的還原點語意。
 
-**變更規格**：兩個迴圈都改為**只在進迴圈前呼叫一次**（`_run_execute_locked` / `_run_plan_locked` 的 for 迴圈之前、首次 review gate 之前）。同步造成的 commit 之後，若 `last_safe_sha` 已存在，**把 `last_safe_sha` 前移到同步 commit 的 HEAD**（避免第一次 review gate 審到框架文件同步 diff）。
+**變更規格**：兩個迴圈都改為**只在進迴圈前呼叫一次**（`_run_execute_locked` / `_run_plan_locked` 的 for 迴圈之前、首次 review gate 之前）。
+🚨 **last_safe_sha 的前移必須是條件式的**：只有當「同步前的 HEAD == 既有 `last_safe_sha`」（= 上個 run 沒有留下未審 commit）時，才把 `last_safe_sha` 前移到同步 commit 的 HEAD。若兩者不等——上個 run 以 max_rounds / human_required / crash 結束時，最後一輪的 agent commit 尚未被審查，**現況正是靠新 run 的首次 gate 補審**——`last_safe_sha` 一律不動，讓首次 gate 審「未審 commits + 同步 commit」的合併 diff（框架文件噪音可接受；計畫書 3 T7 落地後同步 commit 會被規約豁免、噪音消失）。❌ 無條件前移＝把未審 commit 洗白，破壞 B7 要保護的審查語意。
 
-**驗收**：新測試 `test_sync_framework_docs_called_once_per_run`（mock 計數）；手動驗證：跑 3 輪的整合測試中 `chore: sync updated loop framework docs` commit ≤ 1 個。
+**驗收**：新測試 `test_sync_framework_docs_called_once_per_run`（mock 計數）、`test_sync_advances_last_safe_only_on_clean_base`（上個 run 留下未審 commit 的 fixture：last_safe 不前移、首次 gate 的 diff 含該 commit）；手動驗證：跑 3 輪的整合測試中 sync commit ≤ 1 個。
 
 ## T7｜修 B8/B9：死碼清理與防禦性 return
 
@@ -100,12 +101,13 @@ revert_res.returncode != 0:
 
 **變更規格**：
 1. `generators/2-plan-review-gate.md` :20-26 移除 `config.min_unit.*` 引用（該 config 已刪）：煙霧圍欄描述改為定性表述「單一任務改動範圍明顯過大（跨多檔多關注點）→ 回頭確認是否包了多個自然單位」。
-2. 門檻數字單一事實來源化：
-   - `rules/state-model.md` :76 與 `rules/state-cli-guide.md` :155 的「threshold 預設為 5」改為「門檻 = 該任務所屬 phase 的 `converge_threshold`（見 loop.config.yaml），CLI 會讀取設定驗證」。
-   - **同時檢查 `engine/state.py` 的 CONVERGED 門檻守衛實際讀哪裡**：若目前寫死 5，改為讀取 config `phases[i].converge_threshold`（找不到 config 時 fallback 5 並輸出 warning）。state.py CLI 需要能定位 config：以 `--state` 路徑同目錄的 `loop.config.yaml` 為準。
+2. 門檻的單一事實來源裁決（收官重審後校正——原版指示「改讀 config」是錯的，會覆蓋合法的異質門檻）：
+   - **實況**：CONVERGED 守衛讀的是**每個任務自己的 `threshold` 欄位**（state.py:1397/1406，`task-add --threshold` 設定、預設 5）——既不是寫死 5、也不該改讀 config。這個 per-task 設計是對的：plan 可以給不同風險的任務不同門檻。
+   - **裁決（寫進文件，三處統一）**：門檻的單一事實來源 = **任務自身的 `threshold` 欄位**；config 的 `phases[].converge_threshold` 是 **plan 期的預設值輸入**（generator 建任務時據此填 per-task threshold，可依任務風險逐一調高）；執行期引擎/CLI 只讀 per-task 值。
+   - `rules/state-model.md` :76 與 `rules/state-cli-guide.md` :155 的「threshold 預設為 5」改為上述裁決的表述；`1-plan-generator.md` 補一句「task-add 時 threshold 依 phase converge_threshold 填入、高風險任務可調高」。
 3. `rules/convergence.md` 門檻表述保持「典型 2~3、由 plan 逐階段自訂」不變（它是對的）。
 
-**驗收**：`grep -rn "min_unit" generators/ rules/ engine/` 為 0 筆；`grep -rn "預設為 5\|預設 5" rules/` 為 0 筆；新測試 `test_converged_threshold_reads_config`。
+**驗收**：`grep -rn "min_unit" generators/ rules/ engine/` 為 0 筆；`grep -rn "預設為 5\|預設 5" rules/` 為 0 筆；新測試 `test_converged_guard_uses_per_task_threshold`（同 phase 兩任務不同 threshold，各自按自己的值把關）。
 
 ## T9｜快速失敗偵測（cli_failing breaker）★ 夜間跑關鍵
 
@@ -193,6 +195,8 @@ revert_res.returncode != 0:
 **變更規格**：loop.py 該分支改為 `finish("stopped", 1)`（無 human_required_code——主動停止不是交人事件，不設 human_required 旗標）；log 訊息改「⏹ 收到停止請求，本輪前優雅停止」。
 
 **驗收**：`test_stop_requested_finishes_as_stopped`（觸發 stop 檔，斷言 run_finished 的 final_status=="stopped" 且 human_required 未被設）。
+
+## T14｜Dead man's switch：外部心跳
 
 **動機**：`notify_cmd`（T11）只在引擎**正常走到終止流程**時發通知；OOM、斷電、`kill -9`、SSH session 帶走 process 這類**靜默死亡**不會發任何東西——早上看到「沒有壞消息」是假象。監控活著的東西，不能靠它自己報死訊，要靠外部服務偵測「心跳停了」。
 

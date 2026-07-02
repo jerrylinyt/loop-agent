@@ -34,6 +34,7 @@ FINAL-ACCEPTANCE.md            ← 收官驗收：帳務重驗、跨計畫整合
 6. 禁止事項：不動 `dashboard/`（另案）；不改 git 安全紅線的語意（`rules/git-safety.md` §2）；不引入新的第三方依賴（標準庫 + PyYAML 為限，計畫書內明確授權者除外）。
 7. 計畫書如與現有程式碼衝突（行號漂移、函式已改名），**以計畫書描述的「行為規格」為準**，行號僅供定位。
 8. **路由總表**：`ROUTING.md` 是「哪個 agent 拿到什麼、哪個產出物誰生產誰消費」的單一稽核點，並含跨計畫增補帳——每本計畫書收 PR 前過一遍該檔 §D 自查；新增/變更注入內容或產出物必須同步更新該表。
+9. **config 鍵收尾規約**：任何工作項新增 config 鍵（DEFAULTS），同一 commit 必須同步補進 `generators/templates/loop.config.template.yaml` 的進階旋鈕註解區（含預設值與一句用途）與 engine/README——FINAL-ACCEPTANCE A4 會反向掃描驗證，漏補即 FAIL。
 
 ## 各計畫書一句話摘要
 

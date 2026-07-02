@@ -30,7 +30,8 @@
      a. state.json 讀 control.run_branch：
         - 已設且該 branch 存在 → git switch <run_branch>（可能是 gated 流程的第二段，接續同一分支）。
         - 未設 → 記下當前 branch 為 base_branch → git switch -c loop/<workspace>/<YYYYMMDD-HHMM>
-          → state 寫入 control.run_branch / control.base_branch（經 state.py 白名單，新增這兩鍵，僅引擎可寫）。
+          → state 寫入 control.run_branch / control.base_branch。
+          🚨 寫入機制（收官重審後校正——「加白名單」是反的）：白名單管的是 **agent CLI 的 set 路徑**，把鍵加進去＝開放 agent 寫入。正確做法：(a) `state.py` 的 control_keys **路由**集合新增這兩鍵（讓引擎的 set_val 落到 control.*）；(b) `_validate_guarded_transition` 新增規則：這兩鍵**僅接受引擎 source**（execute_loop/plan_loop/resume 類）寫入，agent CLI 來源一律拒絕——否則 agent 可改寫 run_branch、讓下個 run `git switch` 到它指定的分支，分支隔離失效。
      b. 若當前已在 control.run_branch 上 → no-op。
      c. git switch 失敗（例如 dirty tree 擋 switch）→ preflight 級錯誤，停止不進迴圈。
    ```
@@ -86,6 +87,7 @@
      build_cmd: "claude -p {prompt} --model {model} --permission-mode acceptEdits"
      models: { fast: "claude-haiku-4-5", normal: "claude-sonnet-5", thinking: "claude-opus-4-8" }
    interactive_cmd: "claude {prompt}"   # 互動模式啟動樣板（帶初始 prompt）；供 init 收尾的「訪談指令」組裝用（見 T2 第 5 點）
+   knowledge_files: ["CLAUDE.md"]       # 該 CLI 原生會自動讀取的 repo 知識檔清單（可空）；REPO_MAP 鏡射目標（見 T10）
    notes: "需先 claude login；模型名請依 `claude models` 實際輸出校正。"
    ```
    （各檔的 build_cmd/模型名以該 CLI 當前實際語法為準，執行本計畫的 agent 需逐一查證後填寫，並在 notes 註明查證日期。）
@@ -126,7 +128,8 @@
    - `loop confirm-requirements`：在 REQUIREMENTS.md 末尾 append `\n---\nREQUIREMENTS CONFIRMED（<git user.name>，<YYYY-MM-DD HH:MM>）\n` 並 git commit。已有標記時 no-op 提示。
 2. **plan 核可（gate#2 蓋章化）**：
    - plan_loop 收斂時（`plan_status=converged` 寫入處）順手產出 `.loop/<ws>/PLAN_SUMMARY.md`：純引擎端確定性生成（不叫 LLM）——各 phase 名稱/任務數/converge_threshold、任務表（id/title/depends_on/verify 類型）、依賴環檢查結果、輪數估算（Σ 任務數×(1+threshold) + final_pass_gte + 10% buffer，公式印出來）、OPEN issues。
-   - state.json `plan` 物件新增 `plan_approved: false / plan_approved_by / plan_approved_at`（引擎與 approve 指令可寫；**state.py 寫入白名單同步新增這三鍵**，且 guarded transition 比照 human_required：approved 只能經 approve/reset-plan 途徑變更，不得由 agent `set`）。
+   - state.json `plan` 物件新增 `plan_approved: false / plan_approved_by / plan_approved_at`（引擎與 approve 指令可寫）。
+     🚨 防偽（收官重審後校正——「白名單新增三鍵」是無效指示）：`state.py` 的 `_is_valid_key` 對 `plan_*` 前綴**本來就全放行**（state.py:78），agent 今天就能 `set plan_approved true` 自批 plan。本任務必須：(a) 在 `_validate_guarded_transition` 加規則——`plan.approved` 比照 `human_required`，僅接受 `approve_plan` / `reset_plan` / dashboard 對應 source 的變更，agent CLI 來源一律拒絕；(b) 順手收斂 `plan_*` 前綴全放行這個洞：白名單改為列舉 agent 合法可寫的 plan 鍵（`plan_changed_last`、`plan_gate_last`、`plan_gate_last_reason`），其餘 plan 鍵拒絕。新測試 `test_agent_cannot_set_plan_approved`。
    - `loop approve-plan`：檢查 `plan_status == converged` → 設 `plan_approved=true` + by/at → git commit。
    - `run.py --stage execute` 的 preflight 新增檢查：gated 模式下 `plan_approved != true` → error「plan 尚未核可，請 review PLAN_SUMMARY.md 後執行 loop approve-plan」。auto 模式不要求（auto 的語意本來就是跳過 gate#2）。
    - reset-plan 時把 `plan_approved` 歸零。
@@ -143,6 +146,7 @@
    - state 新增欄位 `control.human_note_inject_until_round`（引擎寫）。resume 帶 note 時設為 `<下一輪起算 + runtime.human_note_rounds(預設 3)>`。
    - 輪次在注入窗口內 → prompt 前綴：`📌 人類裁決附註（優先於既有規劃衝突處，請先讀）：\n<HUMAN_NOTES.md 最後一則區塊>`。
    - 窗口過後自動停止注入（檔案保留作為歷史）。
+   - **每次實際注入寫一筆 rounds.jsonl record**（`type: note_injected`，含 round 與 note 的 ts）——dashboard 趨勢圖的事件標記層（dashboard#3 T1 的 📌）需要此資料源。
 3. HUMAN_NOTES.md 進版控（是裁決記錄）。
 
 **驗收**：新測試 `test_resume_clears_flag_and_restarts`、`test_note_injected_for_n_rounds_then_stops`、`test_note_size_cap`。
@@ -173,7 +177,9 @@
 ```
 並附「常見夜間死法對照表」：token 過期 → cli_failing 停機（doctor 冒煙可預防）；規格矛盾 → human_required + FROZEN；空轉 → idle watchdog。
 
-**驗收**：文件存在、README 連結有效、內容與本計畫實作的指令一致。
+**另產出 `docs/security-guidelines.md`（review §7.4 的承諾，收官重審補入）**，一頁明列：agent 是拿使用者憑證在跑——只在隔離 run branch 上工作、引擎絕不 push（寫明並在 FINAL 驗收 grep 確認 engine 無 push 呼叫）、目標 repo 不得含生產憑證/機密檔、agent CLI 的 auto-approve/權限範圍設到 repo 目錄內（逐 CLI 附設定位置）、log 與 commit 的 secret 風險（連到計畫書 4 M4 的 L0 secret 掃描）。checklist 第一行引用它。
+
+**驗收**：兩份文件存在、README 連結有效、內容與本計畫實作的指令一致；security-guidelines 覆蓋上列五點。
 
 ## T10｜REPO_MAP：機械生成 repo 地圖（CLI 中立的知識管道）
 
@@ -192,7 +198,7 @@
    - `pointer`：base prompt（v2 時代）/ 任務卡（計畫書 4 落地後）固定加一行：「repo 佈局與 build/test 指令見 `.loop/REPO_MAP.md`，需要時再讀，勿自行重新探索目錄結構」。
    - `embed`：直接內嵌正本全文（上限 8KB，超過自動退回 pointer 並 warning）——給「讀檔成本高／不擅長主動讀檔」的 CLI 用。
 4. **鏡射管道（優化線，可選）**：
-   - profile（T3）欄位改為**清單** `knowledge_files: ["CLAUDE.md"]`（可空；一個 repo 的同事可能用不同 CLI，`loop repomap --mirror AGENTS.md` 可追加鏡射目標，記錄於 config）。
+   - 鏡射目標取自 profile 的 `knowledge_files` 清單欄位（T3 格式已定義；可空。一個 repo 的同事可能用不同 CLI，`loop repomap --mirror AGENTS.md` 可追加鏡射目標，記錄於 config）。
    - 鏡射內容寫入各檔的 `<!-- LOOP:REPO_MAP:start -->` / `<!-- LOOP:REPO_MAP:end -->` 標記區塊；**檔案已存在時只替換標記區塊、絕不動人寫的其他內容**；不存在則建立。
    - 正本更新時所有鏡射一併刷新（單一事實來源，鏡射永不手改）。
 5. 觸發時機：`loop init` 生成並提示人過目一次（機械生成也可能誤導，如殘留的過時 Makefile）；`loop repomap` 手動重生成；`loop doctor` 檢查陳舊度（生成時間點之後 repo 已新增 > 200 個 commit → warning 建議重生成）＋檢查鏡射與正本一致。
@@ -247,7 +253,7 @@
 
 **變更規格**：
 1. config 新增 `runtime.notify_quiet_hours: ""`（如 `"23:00-07:00"`，空 = 不靜音）。
-2. 靜音時段內：**致命級**（human_required 全部代碼、disk_low、cli_failing）照發；**非致命級**（complete、smoke_finished、未來 H1.2 的 QUESTION 級）寫入 `.loop/<ws>/.loop_state/notify_queue.jsonl` 不發。
+2. 靜音時段內：**致命級**（human_required 全部代碼、disk_low、cli_failing）照發；**非致命級**（complete、未來 H1.2 的 QUESTION 級）寫入 `.loop/<ws>/.loop_state/notify_queue.jsonl` 不發。（smoke 依 T5 本來就不觸發 notify，不在任何分級內。）
 3. 佇列消化：下次任何 notify 觸發時若已出靜音時段，先把佇列合併成一則 digest（「昨夜累積 N 則：…」）帶出；引擎已停的情況由 `loop status` / `loop report` 執行時檢查並提示（不依賴常駐程序）。
 4. 「下班前 checklist」對應更新（建議設定值範例）。
 
@@ -259,6 +265,7 @@
 
 **變更規格**：
 1. `examples/mini-migration/`：一個 20 檔以內的假 legacy 專案（如 2 隻舊式 API + 1 個簡單頁面）+ **已填好的** `REQUIREMENTS.md`（含依 `acceptance-standards.md` 寫好的 DoD 與 parity 驗收）+ 一頁 `TUTORIAL.md`（從 `loop init --profile …` 到 `loop accept` 的完整劇本，每步附預期輸出截句）。
+1-b. **任務型 preset（review §7.2 的承諾，收官重審補入）**：新目錄 `presets/`，四份任務型範本——`migration/`（遷移）、`test-coverage/`（補測試）、`doc-generation/`（批量文件）、`data-cleaning/`（資料清洗）——每份含：依 acceptance-standards 對應章節預填的 REQUIREMENTS 範本（DoD 模板句已就位、留 `<待填>` 槽）＋ 建議的 phases/門檻註解段。`loop init --preset <type>` 以之取代空白 REQUIREMENTS 樣板（與 `--profile` 正交：profile 管 CLI/模型、preset 管任務型）。**這也是計畫書 5 T4 任務型聚類校準的消費目標**（校準建議寫給 presets 的建議門檻段，不碰 CLI profile）。
 2. 設計原則：任務小到用 fast 模型 ≤ 30 輪內可完成；verify 全部 `command` 型（體驗客觀驗證的完整閉環）；故意留一個需要開 Issue 的小陷阱（讓學員見過一次「不腦補、開 Issue」的正確行為）。
 3. README「怎麼開始」第一行改為指向 tutorial：「第一次用？先花 30 分鐘跑 examples/mini-migration。」
 

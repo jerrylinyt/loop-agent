@@ -15,7 +15,7 @@
 - [ ] A1. 九本計畫書的「最終驗收清單」在**最終 HEAD** 上逐條重跑（機械項直接跑、演練項重演），逐條記 PASS/FAIL/N.A.（含理由）。
 - [ ] A2. ROUTING.md §C 增補帳逐筆核對實作痕跡（L1 任務卡落檔、L2 registry owner、L3 rounds 欄位、L5 prompt 引用、L6 L1 上下文）——不是「計畫書寫了」，是「程式碼裡有」。
 - [ ] A3. 全 repo 掃描：`grep -rn "TODO\|FIXME\|XXX" engine/ cli.py dashboard/`（排除測試 fixture）逐筆分類：本系列引入的 → 修掉或入 D 缺口清單；歷史遺留 → 記錄。
-- [ ] A4. 死設定掃描：config DEFAULTS 每個鍵在 engine/dashboard 至少一個非測試引用（防再出 `journal_in_control_keep` 型死鍵）——寫成一次性腳本跑。
+- [ ] A4. 死設定掃描：config DEFAULTS 每個鍵在 engine/dashboard 至少一個非測試引用（防再出 `journal_in_control_keep` 型死鍵）——寫成一次性腳本跑。**同一腳本反向再驗**：DEFAULTS 每個鍵都出現在 `loop.config.template.yaml` 的進階旋鈕註解區與 engine/README（本系列新增約 15 個鍵，使用者必須能從 template 發現它們，不能只活在原始碼）。
 - [ ] A5. 文件引用掃描：CI 參照完整性測試綠之外，人工抽查 README／engine/README／bootstrap／checklist／errors.md 的指令範例**每條實際執行一次**（文件裡的指令打不動是新同事的第一個坑）。
 
 ## B. 跨計畫整合情境（各包單測不到的縫）
@@ -30,6 +30,8 @@
 - [ ] B6. **reset 全家 × v3 schema**：reset-plan / reset-execute（含 --reset-to-task）在 v3 state 上行為正確（欄位齊、dashboard 顯示一致、rounds 歸因不錯亂）。
 - [ ] B7. **INDEX/REPO_MAP 預算聯動**：構造超長 INDEX（>150 行）＋ embed 模式 REPO_MAP → 任務卡降級策略生效且總量不破 `task_card_max_bytes`。
 - [ ] B8. **dashboard 操作 × 引擎守衛**：dashboard 連按兩次 resume／run 期間改 config／read-only 模式 POST——三者都被正確擋下且 audit 有記錄。
+- [ ] B9. **引擎自產 commit × Review Gate**（docs#3 T7 規約）：run 中觸發壓實與修剪 → 下一次 gate 正確豁免、last_safe 前移；同 run 內構造一個「偽造 `loop-engine:` 前綴但路徑越界」的 commit → 不豁免、照審。
+- [ ] B10. **analytics 迴路（計畫書 5 × 2 的縫）**：用 B1 主劇本產生的**真實 run 資料**跑 `loop analyze --all --suggest` → 指標與 RUN_REPORT 數字相符、至少一條建議可人工驗證合理；接著開第二個 workspace 走 plan → PLAN_SUMMARY 顯示 estimation-history 校正係數已套用（含樣本數）。
 
 ## C. 量化指標驗收（對 docs/review §8 的承諾結帳）
 
