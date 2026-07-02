@@ -164,6 +164,24 @@
 
 **驗收**：文件存在、README 連結有效、內容與本計畫實作的指令一致。
 
+## T10｜REPO_MAP：機械生成 repo 地圖，走 agent CLI 原生知識管道
+
+**動機**：無狀態 agent 每輪重新摸路（grep 目錄結構、找 build 指令）浪費 token 與輪內時間。agent CLI 原生就會自動讀 repo 根的知識檔（Claude Code → `CLAUDE.md`；opencode/codex 等 → `AGENTS.md`），框架該做的是**餵飽這個原生管道**，不是自建檢索。地圖層知識是機械可抽取的，**全程不呼叫 LLM**。
+
+**變更規格**：
+1. 新模組 `engine/repomap.py`：`generate_repo_map(repo_path) -> str`，純機械生成：
+   - 目錄樹（深度 ≤ 3；排除 .gitignore 命中項；每目錄附檔數統計）；
+   - 偵測到的指令：package.json scripts / Makefile targets / pyproject（test/lint 相關）→ 列成「可能的 build / test / lint 指令」表；
+   - 語言組成（`git ls-files` 副檔名統計 top 5）；
+   - loop 保留區一句話說明（`.loop/` 的角色、勿手動編輯 state.json）。
+2. **注入管道（受管區塊）**：
+   - profile（T3）新增欄位 `knowledge_file: CLAUDE.md | AGENTS.md`（依該 CLI 原生讀取的檔名）。
+   - 生成內容寫入 repo 根該檔的 `<!-- LOOP:REPO_MAP:start -->` / `<!-- LOOP:REPO_MAP:end -->` 標記區塊之間；**檔案已存在時只替換標記區塊、絕不動人寫的其他內容**；不存在則建立。
+3. 觸發時機：`loop init` 生成並提示人過目一次（機械生成也可能誤導，如殘留的過時 Makefile）；`loop repomap` 手動重生成；`loop doctor` 檢查陳舊度（生成時間點之後 repo 已新增 > 200 個 commit → warning 建議重生成）。
+4. `generators/0-requirements-interview.md` 補一句：訪談收尾確認 REPO_MAP 已生成且使用者掃過一眼。
+
+**驗收**：`test_repo_map_mechanical_content`（fixture repo 斷言含目錄樹/指令表/語言統計）、`test_repo_map_managed_section_preserves_user_content`（既有 CLAUDE.md 的人寫內容在重生成後 byte-level 不變）、`test_doctor_warns_stale_repomap`。
+
 ---
 
 ## 最終驗收清單
@@ -174,3 +192,4 @@
 - [ ] gated 模式下未 approve-plan 無法進 execute（preflight error 實測）
 - [ ] `loop resume --note` 的附註確實出現在下一輪 agent prompt（log 可查），3 輪後消失
 - [ ] README、engine/README.md、bootstrap.md、checklist 文件一致採用 `loop` CLI 為主要入口
+- [ ] REPO_MAP：init 生成受管區塊、重生成不動人寫內容、doctor 陳舊警告，三者經 fixture 驗證
