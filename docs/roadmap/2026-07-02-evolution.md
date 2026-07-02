@@ -67,7 +67,7 @@
 
 | 層 | 內容 | 抽取方式 | 查詢方式 | 落點 |
 |----|------|----------|----------|------|
-| repo 地圖 | 目錄結構、build/test 指令、語言組成 | 機械腳本（零 LLM） | agent CLI 原生讀 CLAUDE.md / AGENTS.md | 計畫書 2 T10（REPO_MAP） |
+| repo 地圖 | 目錄結構、build/test 指令、語言組成 | 機械腳本（零 LLM） | 正本 `.loop/REPO_MAP.md`；框架 prompt 注入為保證線（CLI 中立），CLAUDE.md/AGENTS.md/GEMINI.md 等原生知識檔僅為鏡射優化 | 計畫書 2 T10（REPO_MAP） |
 | run 內知識 | 分析任務的產出結論 | 既有收斂管線（多輪獨立重驗，本來就是抽取管線） | INDEX 目錄即查詢，注入任務卡 | 計畫書 4 M2.4 |
 | 跨 run 記憶 | 教訓/慣例/地雷 | agent 提案 + **人審入庫** | 按任務標籤選擇性注入 ≤5 條 | 本項（H1.3） |
 
