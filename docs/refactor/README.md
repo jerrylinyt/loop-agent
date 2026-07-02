@@ -13,6 +13,9 @@
                 │
                 ▼
 4-engine-v3-orchestration.md   ← 大翻新，依賴 1/2/3 全部完成
+                │
+                ▼
+5-workspace-analytics-optimization.md   ← 執行歷史分析與校準優化，依賴 1/2/3/4
 ```
 
 ## 給執行本系列計畫的 coding agent 的共同約定
@@ -36,3 +39,4 @@
 | 2 | `2-overnight-workflow.md` | 隔離分支模式、統一 `loop` CLI、doctor/smoke、需求確認硬 gate、PLAN_SUMMARY、人類回饋通道、驗收 gate |
 | 3 | `3-context-growth-budget.md` | 系統性治理「檔案無限長大 → 被讀進 context / 拖垮引擎」：state.json 預算執法、jsonl 輪替與尾讀、review prompt 內嵌上限、證據檔修剪 |
 | 4 | `4-engine-v3-orchestration.md` | v3 大翻新：引擎挑任務發任務卡、verify 契約引擎執行、state.json schema v3、Review Gate 分層、rules 瘦身 |
+| 5 | `5-workspace-analytics-optimization.md` | 分析跑過的 workspace：任務級成本歸因、`loop analyze`、門檻校準建議（只建議不自動改）、輪數估算回饋校正 |
