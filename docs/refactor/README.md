@@ -16,6 +16,9 @@
                 │
                 ▼
 5-workspace-analytics-optimization.md   ← 執行歷史分析與校準優化，依賴 1/2/3/4
+                │
+                ▼（dashboard/refactor 1–4 亦完成後）
+FINAL-ACCEPTANCE.md            ← 收官驗收：帳務重驗、跨計畫整合情境、指標結帳、缺口清點、人類簽核
 ```
 
 ## 給執行本系列計畫的 coding agent 的共同約定
@@ -41,3 +44,4 @@
 | 3 | `3-context-growth-budget.md` | 系統性治理「檔案無限長大 → 被讀進 context / 拖垮引擎」：state.json 預算執法、jsonl 輪替與尾讀、review prompt 內嵌上限、證據檔修剪 |
 | 4 | `4-engine-v3-orchestration.md` | v3 大翻新：引擎挑任務發任務卡、verify 契約引擎執行、state.json schema v3、Review Gate 分層、rules 瘦身 |
 | 5 | `5-workspace-analytics-optimization.md` | 分析跑過的 workspace：任務級成本歸因、`loop analyze`、門檻校準建議（只建議不自動改）、輪數估算回饋校正 |
+| 終 | `FINAL-ACCEPTANCE.md` | 全系列收官驗收：九本清單在最終 HEAD 重驗、八個跨計畫整合情境、量化指標結帳、缺口三分流（修/簽核降級/backlog）、人類簽核關閉系列 |
