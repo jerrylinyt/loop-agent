@@ -25,6 +25,13 @@
             可獨立驗證的單一 component；proxy：≤ config.min_unit.max_files 檔、
             ≤ config.min_unit.max_lines 行、單一關注點。
             過大的葉子退回重拆。只有葉子受此約束,中間節點不受。
+□ 驗收標準達標:逐 phase 抽查任務的「驗證標準」欄,不得低於 acceptance-standards.md §6 速查表——
+            · 後端 API 任務:有 integration test(真 request、斷言 status+schema+資料值,含錯誤路徑),
+              只寫「能編譯/status 200」→ 退回。
+            · 前端任務:有 component test 或 Playwright E2E(含操作與資料斷言),只寫「畫面正常」→ 退回。
+            · 分析任務:有 inventory 分母 + 行覆蓋 + 逐分支 + 檔:行 追溯要求,只寫「分析完成」→ 退回。
+            · 遷移專案:存在 MIGRATION_CONTRACT 先行任務(人簽核),且對照驗證選型(P1 parity/P2 特徵/P3 規格對照)已定。
+            · 純主觀品質項:已標 MANUAL 且不在機械停止條件內。
 □ 無循環依賴:階段/任務依賴是 DAG(畫出依賴、確認無環)。
 □ 停止可判讀:config.stop_condition 全是可 grep 的計數器,且不會死結
             (確認用 blocking_issues==0,非「Open Issue=0」)。

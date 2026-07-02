@@ -35,6 +35,10 @@
   (定義見 BLUEPRINT §3.10「最小工作單位」——該節雖在樹模式段,粒度判準對平 phase 模式同樣適用。)
 - **依賴無循環**:階段/任務依賴是 DAG。
 - **收斂安排**:不信單次的任務 → 指定收斂層級與門檻(convergence.md);大範圍怕漏的任務 → 套 completeness.md(列舉清單 + 行覆蓋 + 集合穩定收斂)。
+- **驗收標準達標**:每個任務的驗證方式【不得低於】`acceptance-standards.md` §6 速查表對應行——
+  後端 API 一律 integration test(真 request 斷言完整資料)、前端一律 component/Playwright E2E、
+  分析任務一律 inventory 分母 + 行覆蓋 + 檔:行 追溯、遷移任務先立 MIGRATION_CONTRACT 再依 P1/P2/P3 選對照驗證。
+  只能寫「能編譯/能跑」當驗收的任務,回頭重想;真的只能人工判定的,明確標 MANUAL 進人審清單、不擋機械停止。
 - **停止可判讀**:stop_condition 全是可 grep 的計數器,**不可**設成「Open Issue=0」(用 blocking_issues==0)。
 - **逃生門**:震盪/卡死門檻、FROZEN、human_required 就位(oscillation-escalation.md)。
 
