@@ -17,7 +17,7 @@
 | 2 | **Git Review L1** | diff --stat 全文 + diff 本文截斷（≤30KB）→ git；state 摘要（≤2KB）+ state.json 的 git diff → 引擎生成；**本輪上下文摘要**（task/action/output 範圍/宣稱推進）→ 引擎組裝；4 項檢查規則 → git-review-gate.md（L1 版） | docs#3 T3、docs#4 M4 |
 | 3 | **Plan 生成輪** | REQUIREMENTS.md；`1-plan-generator.md`（含 verify 契約、spec_ref 錨點格式、tier_hint、INDEX 任務要求、acceptance-standards §6 下限）；rules（**重組後檔名**：PHILOSOPHY、context-budget、state-model(v3)、convergence、completeness）；上輪退回原因 → plan.gate_last_reason | prompts.yaml `plan` + docs#4 M5 第 8 點 |
 | 4 | **Plan Gate 輪** | 規劃書檔（config/state/phases）；`2-plan-review-gate.md`（含驗收標準抽查項）；acceptance-standards.md | prompts.yaml `plan_gate` + docs#4 M5 |
-| 5 | **前期準備（bootstrap/訪談）** | bootstrap.md（loop CLI 版指令）；0-requirements-interview.md（acceptance-standards §7 三必問、REPO_MAP 確認、跨專案 worktree 段） | docs#2 T2/T10、acceptance-standards |
+| 5 | **前期準備（訪談，經 INTERVIEW.md 開工檔）** | `.loop/<ws>/INTERVIEW.md`（init 生成，內含完整開工指示：0-requirements-interview 問題清單、acceptance-standards DoD 模板、REQUIREMENTS 落點、bootstrap 邊界規則）——使用者貼一條指令啟動自己的 agent CLI 去讀它；bootstrap.md 保留為「純 agent 入口」的舊路徑 | docs#2 T2 第 5 點、dashboard#2 T6-b |
 
 **不進任何 agent context 的東西（刻意）**：loop.log/plan.log、rounds.jsonl、state_events.jsonl、RUN_REPORT、PLAN_SUMMARY、ANALYSIS、CONFIG_SUGGESTIONS、errors.md、registry.json、dashboard 一切。人看的與機器記帳的，永不回流 prompt——context 紀律。
 
@@ -41,6 +41,7 @@
 | loop.config.yaml | init/人/dashboard（三道欄） | dashboard Config 籤 | 引擎每次 run 啟動載入 | 否（門檻值由引擎代入行為） |
 | registry.json（+owner） | 引擎 update_index | dashboard fleet | analyze/collect 發現 workspace | 否 |
 | docs/errors.md | 框架文件 | 通知/RUN_REPORT 錨點連結 | CI 防漏測試 | 否 |
+| INTERVIEW.md | `loop init`（樣板代入） | dashboard 精靈顯示對應啟動指令 | 使用者的 agent CLI 於訪談時讀取 | 僅訪談 session |
 | lessons.md（未來 H1.3） | 人審入庫 | dashboard | 任務卡命中注入 ≤5 條 | 命中時 |
 
 ## C. 跨計畫增補帳（Amendments Ledger）
@@ -57,6 +58,7 @@
 | L6 | 本表 | docs#4 M4 | L1 review prompt 帶本輪上下文摘要 | 已補進 docs#4 M4 |
 | L7 | dashboard#1 T1 | docs#2 T2 | `loop dashboard` 子命令插槽（參數透傳） | 已補進 docs#2 T2 表 |
 | L8 | 收官重審 | docs#1 T13b | loop.py stop_requested 誤標 broken_control_file（B11） | 已補進 docs#1 |
+| L9 | dashboard#2 T6-b | docs#2 T2/T3 | init 生成 INTERVIEW.md + 印訪談指令；profile 增 `interactive_cmd` 欄位（dashboard 與 CLI 共用同一組裝函式） | 已補進 docs#2 |
 
 ## D. 執行 agent 的自查（每本計畫書收 PR 前）
 

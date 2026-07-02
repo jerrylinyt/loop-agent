@@ -68,6 +68,10 @@
    | `loop dashboard [--port] [--token] [--read-only]` | dashboard 服務啟動（dashboard/refactor 計畫書 1 T1；本計畫僅保留子命令插槽與參數透傳） | |
 3. 所有子命令共用 `--workspace/-w`；在非 code-repo 目錄執行時給出明確錯誤（找不到 `.loop/`）。
 4. 文件全面改版：README 的指令範例改用 `loop …`（`python3 run.py` 寫法移到「進階/無安裝」附註）；`generators/bootstrap.md` STEP 1/5 的指令同步改。
+5. **`loop init` 收尾產出「訪談開工檔 + 下一步指令」**（dashboard 精靈與 CLI 共用同一機制）：
+   - init 生成 `.loop/<ws>/INTERVIEW.md`：以樣板組成（`generators/templates/` 新增 INTERVIEW.template.md），內容＝**給 agent 的完整開工指示**——你的任務是需求訪談；依 `.loop/generators/0-requirements-interview.md` 的問題清單一組一組問；DoD 依 `.loop/generators/acceptance-standards.md` 對應任務型套模板句；把結果寫進 `.loop/<ws>/REQUIREMENTS.md`（路徑已代入）；完成後請使用者回 dashboard（或跑 `loop confirm-requirements`）確認；🚨 邊界規則照抄 bootstrap.md（絕不自行執行 plan/run/loop 等長迴圈）。
+   - init 結尾印出**可直接貼上執行的一條指令**：由 profile 的 `interactive_cmd` 樣板（見 T3）代入組成，形如 `cd <repo> && <cli 互動啟動> "請讀取 .loop/<ws>/INTERVIEW.md 並完全依其指示進行"`。prompt 僅此一句，內容全在檔案裡（避免 shell 跳脫問題、跨 CLI 通用）。
+   - dashboard 的 New Workspace 精靈（dashboard/refactor 計畫書 2 T6-b）顯示的就是同一條指令（同一組裝函式，勿重複實作）。
 
 **驗收**：`loop --help` 列出全部子命令；每個子命令 `--help` 可用；新測試 `test_cli_dispatch`（mock 委派、驗證參數透傳）；README/bootstrap 無殘留舊入口為主要指引。
 
@@ -81,6 +85,7 @@
    agent:
      build_cmd: "claude -p {prompt} --model {model} --permission-mode acceptEdits"
      models: { fast: "claude-haiku-4-5", normal: "claude-sonnet-5", thinking: "claude-opus-4-8" }
+   interactive_cmd: "claude {prompt}"   # 互動模式啟動樣板（帶初始 prompt）；供 init 收尾的「訪談指令」組裝用（見 T2 第 5 點）
    notes: "需先 claude login；模型名請依 `claude models` 實際輸出校正。"
    ```
    （各檔的 build_cmd/模型名以該 CLI 當前實際語法為準，執行本計畫的 agent 需逐一查證後填寫，並在 notes 註明查證日期。）

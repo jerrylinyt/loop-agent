@@ -70,14 +70,19 @@
 
 **規格**：
 1. 總覽頁 `＋ New Workspace` 按鈕 → 三步精靈：
-   - **Step 1 初始化**：表單（repo 路徑（後端驗證是 git repo）、workspace 名稱、profile 下拉（讀 `profiles/*.yaml` 清單））→ 呼叫全域動作 `init`（= `loop init <repo> --name <ws> --profile <p>`，經動作執行器）→ 成功即入 registry、出現於總覽。
-   - **Step 2 需求**：二選一路徑，畫面並列說明——
-     - **(a) 自己寫**：REQUIREMENTS.md 編輯器（載入 init 產生的樣板；側欄固定顯示 `acceptance-standards.md` §7 三必問與對應任務型的 DoD 模板句，照抄改）。存檔經 file 寫入（此檔為人擁有，比照 config 的直寫＋git commit 規則）。
-     - **(b) 用 agent 訪談**：顯示一鍵複製的 bootstrap 指引（「開你的 agent CLI，貼上這段」——內容為 bootstrap.md 路徑與 workspace 參數的組合指令），並提示「訪談完成後回到這裡按重新整理」。dashboard **不代跑**訪談（那是互動式對話，屬 agent CLI 的主場；內嵌對話見計畫書 4 展望 O11）。
+   - **Step 1 初始化**：表單（repo 路徑（後端驗證是 git repo）、workspace 名稱、profile 下拉（讀 `profiles/*.yaml` 清單））→ 呼叫全域動作 `init`（= `loop init <repo> --name <ws> --profile <p>`，經動作執行器）→ 成功即入 registry、出現於總覽。init 同時生成**訪談開工檔** `.loop/<ws>/INTERVIEW.md`（規格見 docs/refactor 計畫書 2 T2 第 5 點——prompt 本體放檔案，不塞 shell 指令）。
+   - **Step 2 需求訪談（主路徑：一鍵複製指令 → 貼到 terminal → 各自的 agent 完成訪談）**：
+     - 精靈顯示一條**可直接執行的指令**（一鍵複製按鈕 + 大字碼區），由後端依 profile 的 `interactive_cmd` 樣板組成，形如：
+       ```bash
+       cd /path/to/repo && claude "請讀取 .loop/featureA/INTERVIEW.md 並完全依其指示進行"
+       ```
+       指令內的 prompt **只有一句**（指向開工檔）——訪談流程、產出要求、邊界規則全部在 INTERVIEW.md 裡，避免 shell 引號/跳脫地獄，也讓任何 CLI 都適用。
+     - 畫面提示三行：「① 貼到你的 terminal 執行 ② 跟著你的 agent 完成訪談（它會把 REQUIREMENTS.md 寫好）③ 回到這頁按下一步」。精靈輪詢 REQUIREMENTS.md 的 mtime/內容變化，偵測到「已從樣板改寫」時自動亮起下一步按鈕。
+     - **次要路徑（摺疊在「已有現成需求？」之下）**：REQUIREMENTS.md 編輯器直接貼上/手寫（載入樣板；側欄顯示 `acceptance-standards.md` §7 三必問與 DoD 模板句）。存檔比照 config 的直寫＋git commit 規則。
    - **Step 3 確認與下一步**：REQUIREMENTS 渲染 + `確認需求`（= confirm-requirements）→ 完成頁引導「跑 doctor → 開始規劃」按鈕。
-2. 精靈可中途離開，狀態以檔案為準（回來時依「REQUIREMENTS 存在？已確認？」自動落在正確步驟——無另存精靈進度，鐵則 1）。
+2. 精靈可中途離開，狀態以檔案為準（回來時依「REQUIREMENTS 存在？已被改寫？已確認？」自動落在正確步驟——無另存精靈進度，鐵則 1）。dashboard **不代跑**訪談（互動式對話是 agent CLI 的主場；內嵌對話見計畫書 4 展望 O11）。
 
-**驗收**：E2E：全新 tmp repo 走精靈 (a) 路徑：init → 編輯需求（斷言側欄含 §7 文案）→ 確認 → 出現在總覽且 preflight 綠；`test_init_action_validates_repo_path`（非 git repo 拒絕）；中途關頁重開落在正確步驟。
+**驗收**：E2E：全新 tmp repo 走主路徑：init → 複製指令（斷言指令含 profile 的 CLI 與 INTERVIEW.md 路徑）→（測試以腳本模擬 agent 改寫 REQUIREMENTS.md）→ 下一步自動亮起 → 確認 → 總覽出現且 preflight 綠；次要路徑編輯器含 §7 文案；`test_init_action_validates_repo_path`（非 git repo 拒絕）；`test_interview_cmd_built_from_profile`（不同 profile 產出對應 CLI 的指令）；中途關頁重開落在正確步驟。
 
 ## T6｜安全基線
 
