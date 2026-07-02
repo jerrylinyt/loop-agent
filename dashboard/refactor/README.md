@@ -40,3 +40,4 @@
 ## 路由總表（跨 engine/dashboard 的資料流稽核點）
 
 `docs/refactor/ROUTING.md` 集中定義「每種 agent 拿到什麼、每個產出物誰生產誰消費、進不進 context」，並含跨計畫增補帳（本系列對 docs/refactor 的增補——任務卡落檔、registry owner 欄位——都記在該帳上）。**執行本系列任一計畫書前先讀它；收 PR 前過它的 §D 自查。**
+（該檔是 refactor 執行期工作版；全系列完工後其 §A/§B 會依實作狀態畢業為常駐的 `docs/architecture/routing.md`，屆時以新位置為準——見 docs/refactor 計畫書 4 收尾。）
