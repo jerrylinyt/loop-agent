@@ -65,6 +65,7 @@
    | `loop repomap` | 見 T10 | |
    | `loop unlock / fsck` | 見 T11 | |
    | `loop upgrade-ack` | 見 T12 | |
+   | `loop dashboard [--port] [--token] [--read-only]` | dashboard 服務啟動（dashboard/refactor 計畫書 1 T1；本計畫僅保留子命令插槽與參數透傳） | |
 3. 所有子命令共用 `--workspace/-w`；在非 code-repo 目錄執行時給出明確錯誤（找不到 `.loop/`）。
 4. 文件全面改版：README 的指令範例改用 `loop …`（`python3 run.py` 寫法移到「進階/無安裝」附註）；`generators/bootstrap.md` STEP 1/5 的指令同步改。
 
@@ -120,7 +121,7 @@
    - `loop confirm-requirements`：在 REQUIREMENTS.md 末尾 append `\n---\nREQUIREMENTS CONFIRMED（<git user.name>，<YYYY-MM-DD HH:MM>）\n` 並 git commit。已有標記時 no-op 提示。
 2. **plan 核可（gate#2 蓋章化）**：
    - plan_loop 收斂時（`plan_status=converged` 寫入處）順手產出 `.loop/<ws>/PLAN_SUMMARY.md`：純引擎端確定性生成（不叫 LLM）——各 phase 名稱/任務數/converge_threshold、任務表（id/title/depends_on/verify 類型）、依賴環檢查結果、輪數估算（Σ 任務數×(1+threshold) + final_pass_gte + 10% buffer，公式印出來）、OPEN issues。
-   - state.json `plan` 物件新增 `plan_approved: false / plan_approved_by / plan_approved_at`（引擎與 approve 指令可寫）。
+   - state.json `plan` 物件新增 `plan_approved: false / plan_approved_by / plan_approved_at`（引擎與 approve 指令可寫；**state.py 寫入白名單同步新增這三鍵**，且 guarded transition 比照 human_required：approved 只能經 approve/reset-plan 途徑變更，不得由 agent `set`）。
    - `loop approve-plan`：檢查 `plan_status == converged` → 設 `plan_approved=true` + by/at → git commit。
    - `run.py --stage execute` 的 preflight 新增檢查：gated 模式下 `plan_approved != true` → error「plan 尚未核可，請 review PLAN_SUMMARY.md 後執行 loop approve-plan」。auto 模式不要求（auto 的語意本來就是跳過 gate#2）。
    - reset-plan 時把 `plan_approved` 歸零。

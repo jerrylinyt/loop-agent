@@ -7,7 +7,7 @@
 ## 三條鐵則（所有階段共同遵守）
 
 1. **檔案是唯一真相**：dashboard 是 `.loop/` 檔案的**讀取投影 + 指令觸發器**，自己不持有任何真相（不建自己的 DB 存狀態；快取可以有，但重啟即拋棄、隨時可從檔案重建）。這是「文件即狀態、可冷接手」原則在 UI 層的延伸。
-2. **單一寫入路徑 = CLI**：dashboard 的所有寫入動作（resume、approve、config 變更…）一律透過 `loop` CLI / `state.py`（source=`dashboard_*`）執行，**嚴禁直接改 state.json**——引擎的守衛與稽核（state_events）因此天然覆蓋 UI 操作。
+2. **單一寫入路徑 = CLI**：dashboard 對**狀態與動作**（resume、approve、issue、start/stop…）一律透過 `loop` CLI / `state.py`（source=`dashboard_*`）執行，**嚴禁直接改 state.json**——引擎的守衛與稽核（state_events）因此天然覆蓋 UI 操作。**唯一例外是 `loop.config.yaml`**：它是人擁有的設定檔（等同人拿編輯器改），dashboard 後端直接寫檔，但必經計畫書 2 T4 的三道欄（schema+preflight 驗證拒存 → git commit 稽核 → 生效語意明示），且樂觀鎖防併發。
 3. **讀取遵守增長紀律**：rounds.jsonl 尾讀/分頁（沿用 `engine/analytics.py` 的 loader，不自己重寫解析）、log 用串流不整檔載入、任何聚合結果照 workspace+檔案 mtime 快取。
 
 ## 關鍵設計裁決（回答規劃時的核心疑問）

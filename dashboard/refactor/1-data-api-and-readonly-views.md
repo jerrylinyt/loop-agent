@@ -35,7 +35,7 @@
 | `GET /api/ws/{id}/task/{task_id}` | 單任務全景：state 欄位 + **spec 散文**（錨點擷取，同任務卡函式）+ reads/output + evidence 檔案清單（路徑+mtime）+ revert_history + 關聯 issues + 該任務的 rounds 摘要列表 |
 | `GET /api/ws/{id}/rounds?limit&offset&task&result&loop_type` | round_finished 分頁列表（新到舊），欄位齊全（round/task/action/result/tier/duration/killed/stuck_level/progressed/fail_fingerprint） |
 | `GET /api/ws/{id}/rounds/{n}` | 單輪詳情（見 T5 資料組裝規格） |
-| `GET /api/ws/{id}/file?path=` | 白名單檔案原文：僅允許 `.loop/<ws>/` 底下的 .md/.yaml/.json 與 evidence 檔；**拒絕任何 `..` 與白名單外路徑**（路徑正規化後前綴檢查） |
+| `GET /api/ws/{id}/file?path=` | 白名單檔案原文：允許 `.loop/<ws>/` 底下的 .md/.yaml/.json 與 evidence 檔，**加上 repo 級 `.loop/` 直下的 .md**（REPO_MAP.md、未來 lessons.md——不含 rules/generators 同步副本以外的任意路徑）；**拒絕任何 `..` 與白名單外路徑**（路徑正規化後前綴檢查） |
 | `GET /api/ws/{id}/reports` | RUN_REPORT.md / PLAN_SUMMARY.md / ANALYSIS.md 的存在性與內容 |
 | `GET /api/ws/{id}/log/stream?file=loop|plan` | SSE：先推最後 200 行，之後 tail -f 式增量 |
 

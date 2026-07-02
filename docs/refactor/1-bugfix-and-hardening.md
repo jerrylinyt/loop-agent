@@ -186,7 +186,13 @@ revert_res.returncode != 0:
 
 **驗收**：CI 在本 branch 全綠；故意把 `base` 從 prompts.yaml 刪掉時 CI 轉紅（驗證防線有效後還原）。
 
-## T14｜Dead man's switch：外部心跳
+## T13b｜修 B11：stop_requested 被誤標為 broken_control_file（收官重審時發現）
+
+**現況**：`engine/loop.py` :449-450，`check_stop_requested` 成立（人主動要求停止，如 dashboard 的 stop）時，走 `finish("broken_control_file", 1, "broken_control_file")`——**主動優雅停止被記成「狀態檔毀損」**：rounds.jsonl 的 final_status 錯、之後的 RUN_REPORT/通知/errors.md 連結全部跟著錯。`plan_loop.py` 的同路徑是正確的（`finish("stopped", 1)`）。
+
+**變更規格**：loop.py 該分支改為 `finish("stopped", 1)`（無 human_required_code——主動停止不是交人事件，不設 human_required 旗標）；log 訊息改「⏹ 收到停止請求，本輪前優雅停止」。
+
+**驗收**：`test_stop_requested_finishes_as_stopped`（觸發 stop 檔，斷言 run_finished 的 final_status=="stopped" 且 human_required 未被設）。
 
 **動機**：`notify_cmd`（T11）只在引擎**正常走到終止流程**時發通知；OOM、斷電、`kill -9`、SSH session 帶走 process 這類**靜默死亡**不會發任何東西——早上看到「沒有壞消息」是假象。監控活著的東西，不能靠它自己報死訊，要靠外部服務偵測「心跳停了」。
 

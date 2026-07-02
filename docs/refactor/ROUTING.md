@@ -55,6 +55,8 @@
 | L4 | dashboard#2 T3 | —（僅引用） | dashboard 代跑 acceptance-standards §6 機械核對（不改該檔） | 無需動作 |
 | L5 | 本表 | docs#4 M5 | plan/plan_gate prompt 檔名引用同步 + CI 參照完整性測試 | 已補進 docs#4 M5 第 8 點 |
 | L6 | 本表 | docs#4 M4 | L1 review prompt 帶本輪上下文摘要 | 已補進 docs#4 M4 |
+| L7 | dashboard#1 T1 | docs#2 T2 | `loop dashboard` 子命令插槽（參數透傳） | 已補進 docs#2 T2 表 |
+| L8 | 收官重審 | docs#1 T13b | loop.py stop_requested 誤標 broken_control_file（B11） | 已補進 docs#1 |
 
 ## D. 執行 agent 的自查（每本計畫書收 PR 前）
 
