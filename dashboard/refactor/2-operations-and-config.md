@@ -15,7 +15,7 @@
 2. **併發防護**：同 workspace 同時只允許一個進行中 action（後端層防抖）；start 類先打 `run.py --preflight --json`，不過就把結果原樣回給前端顯示，不啟動。
 3. **稽核**：每個 action 寫一行 `~/.loop/dashboard-audit.jsonl`（ts、workspace、action、參數摘要、發起端 IP、rc）。
 4. 動作白名單（逐一列舉，不做通用「執行任意指令」endpoint）：
-   `plan / execute / stop / smoke / doctor / resume / reset-plan / reset-execute / confirm-requirements / approve-plan / accept / reject / unlock / fsck / repomap / upgrade-ack / track(登錄 workspace)`。
+   `plan / execute / stop / smoke / doctor / resume / reset-plan / reset-execute / confirm-requirements / approve-plan / accept / reject / unlock / fsck / repomap / upgrade-ack / track(登錄 workspace) / init(見 T7，全域動作：不綁既有 workspace，參數為 repo 路徑+名稱+profile)`。
 5. `stop` 實作 = 寫入引擎既有的 `stop_requested` 檔（`check_stop_requested` 機制），**不是 kill**——當前輪跑完優雅停；UI 標示「停止中（本輪結束後生效）」。另提供 `force-stop`（kill 鎖檔 pid 的 process group）藏在二次確認之後。
 
 **驗收**：`test_action_whitelist_only`（白名單外 404）、`test_concurrent_action_rejected`、`test_stop_writes_flag_not_kill`、audit 檔逐 action 落行。
@@ -64,6 +64,21 @@
 
 **驗收**：E2E：resolve 一個 BLOCKING issue → blocking 計數歸零 → phase 紅框解除。
 
+## T6-b｜New Workspace 精靈（把「從零開始」拉進 dashboard）
+
+**動機**：track 只能登錄**已存在**的 workspace——「開新專案」仍得回終端機跑 `loop init` 或貼 bootstrap.md 給 agent。這是同事第一次接觸的斷點，體驗最生的一段反而沒有 UI。
+
+**規格**：
+1. 總覽頁 `＋ New Workspace` 按鈕 → 三步精靈：
+   - **Step 1 初始化**：表單（repo 路徑（後端驗證是 git repo）、workspace 名稱、profile 下拉（讀 `profiles/*.yaml` 清單））→ 呼叫全域動作 `init`（= `loop init <repo> --name <ws> --profile <p>`，經動作執行器）→ 成功即入 registry、出現於總覽。
+   - **Step 2 需求**：二選一路徑，畫面並列說明——
+     - **(a) 自己寫**：REQUIREMENTS.md 編輯器（載入 init 產生的樣板；側欄固定顯示 `acceptance-standards.md` §7 三必問與對應任務型的 DoD 模板句，照抄改）。存檔經 file 寫入（此檔為人擁有，比照 config 的直寫＋git commit 規則）。
+     - **(b) 用 agent 訪談**：顯示一鍵複製的 bootstrap 指引（「開你的 agent CLI，貼上這段」——內容為 bootstrap.md 路徑與 workspace 參數的組合指令），並提示「訪談完成後回到這裡按重新整理」。dashboard **不代跑**訪談（那是互動式對話，屬 agent CLI 的主場；內嵌對話見計畫書 4 展望 O11）。
+   - **Step 3 確認與下一步**：REQUIREMENTS 渲染 + `確認需求`（= confirm-requirements）→ 完成頁引導「跑 doctor → 開始規劃」按鈕。
+2. 精靈可中途離開，狀態以檔案為準（回來時依「REQUIREMENTS 存在？已確認？」自動落在正確步驟——無另存精靈進度，鐵則 1）。
+
+**驗收**：E2E：全新 tmp repo 走精靈 (a) 路徑：init → 編輯需求（斷言側欄含 §7 文案）→ 確認 → 出現在總覽且 preflight 綠；`test_init_action_validates_repo_path`（非 git repo 拒絕）；中途關頁重開落在正確步驟。
+
 ## T6｜安全基線
 
 **規格**：預設僅綁 `127.0.0.1`；提供 `--token <secret>` 啟動參數（設定後所有 API 要求 `Authorization: Bearer`，前端登入頁輸入一次存 localStorage）——這是計畫書 4 團隊模式前的最低限度遠端存取方案；文件明確警告「不要裸奔綁 0.0.0.0」。
@@ -76,5 +91,6 @@
 
 - [ ] 全部寫入動作經 CLI（後端程式碼稽核：對 `.loop/` 的 `open(..., "w")` 僅存在於零處；audit jsonl 覆蓋每次動作）
 - [ ] 四狀態按鈕矩陣、三 gate 流程、config 三道欄、issue resolve——E2E 全綠
+- [ ] New Workspace 精靈 (a) 路徑從全新 repo 到「可開始規劃」全程不離開 dashboard；(b) 路徑的複製指引可直接貼進 agent CLI 使用
 - [ ] 破壞性動作皆有二次確認；stop 為優雅停；force-stop 需確認
 - [ ] `loop dashboard --token` 模式下未帶 token 的 API 全 401

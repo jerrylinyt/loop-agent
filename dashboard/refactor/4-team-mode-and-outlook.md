@@ -51,6 +51,7 @@
 | O8 | **行動端裁決** | roadmap H2.3 的 IM bot 與 dashboard 共用動作執行器與 audit——同一套白名單、兩個入口 | dashboard 2、roadmap H2.3 |
 | O9 | **多機 fleet** | 跨機器聚合（每台跑 agent 上報或共享檔案系統）：中央 registry 服務、機器健康（心跳/磁碟/負載）。屬 roadmap H2.1 的 UI 面 | roadmap H2.1 |
 | O10 | **嵌入式教學** | 首次開啟引導 tour（空狀態頁直接引導跑 examples/mini-migration）；每個面板的 `?` 連到對應 rules/docs 錨點——把文件塞進使用情境裡 | dashboard 1、docs/refactor 2 T16 |
+| O11 | **內嵌需求訪談** | New Workspace 精靈的 (b) 路徑升級：dashboard 以 pty 驅動一個 agent CLI 子行程跑 `0-requirements-interview.md`，聊天式面板互動、產出直接落 REQUIREMENTS.md——「從零到確認需求」完全不離開瀏覽器。複雜度高（互動式子行程管理、逐 CLI 相容），先用複製指引頂著，等精靈 (a)/(b) 的使用比例數據說話 | dashboard 2 T6-b |
 
 **展望的取捨原則**：O1/O7/O10 純 dashboard 內即可動工（無引擎依賴，隨時可做）；O2–O4、O6、O8、O9 跟著 roadmap 對應項走（引擎先行、UI 跟上）；O5 動到結構變更授權，最後做。
 
