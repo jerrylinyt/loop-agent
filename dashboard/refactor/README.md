@@ -36,3 +36,7 @@
 | 4 | `4-team-mode-and-outlook.md` | 團隊化（owner/分享/權限）+ 展望清單 | 前三階段 |
 
 > 階段 1 完成即可日常使用（看得到一切）；2 補齊「不用開終端機」；3 是分析力；4 是規模化。各階段獨立驗收。
+
+## 路由總表（跨 engine/dashboard 的資料流稽核點）
+
+`docs/refactor/ROUTING.md` 集中定義「每種 agent 拿到什麼、每個產出物誰生產誰消費、進不進 context」，並含跨計畫增補帳（本系列對 docs/refactor 的增補——任務卡落檔、registry owner 欄位——都記在該帳上）。**執行本系列任一計畫書前先讀它；收 PR 前過它的 §D 自查。**
