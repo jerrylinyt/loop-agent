@@ -8,7 +8,7 @@
 ## 0. 目標
 
 1. 修復 10 個已確認缺陷，其中 **B1 是啟動 blocker**（新專案 preflight 必然失敗），最優先。
-2. 補齊「無人值守整晚跑」缺的三個安全機制：**快速失敗偵測**、**牆鐘上限**、**終止通知**。
+2. 補齊「無人值守整晚跑」缺的安全機制：**快速失敗偵測**、**牆鐘上限**、**終止通知**、**外部心跳（dead man's switch）**、**磁碟守衛**、**殘留鎖秒級接手**、**CLI 版本遙測**。
 3. 終止時自動產出人類可讀的 **RUN_REPORT.md**。
 4. 建立 CI 煙霧測試，保證「B1 這種等級的 regression 不會再靜默存活」。
 
@@ -186,6 +186,54 @@ revert_res.returncode != 0:
 
 **驗收**：CI 在本 branch 全綠；故意把 `base` 從 prompts.yaml 刪掉時 CI 轉紅（驗證防線有效後還原）。
 
+## T14｜Dead man's switch：外部心跳
+
+**動機**：`notify_cmd`（T11）只在引擎**正常走到終止流程**時發通知；OOM、斷電、`kill -9`、SSH session 帶走 process 這類**靜默死亡**不會發任何東西——早上看到「沒有壞消息」是假象。監控活著的東西，不能靠它自己報死訊，要靠外部服務偵測「心跳停了」。
+
+**變更規格**：
+1. config 新增 `runtime.heartbeat_url: ""`（空 = 關閉）。
+2. 引擎每輪頂端（與 `touch_run_lock` 同位置）對該 URL 發一次 HTTP GET（標準庫 `urllib.request`，timeout 10s）；`plan_loop` 同樣支援。
+3. 失敗（網路錯/非 2xx）只 log warning、**絕不影響迴圈**；連續失敗不累計任何停機邏輯（心跳的可靠性歸外部服務管）。
+4. `finish()` 時對 `{heartbeat_url}/fail` 或 `?status=<status>` 發最後一擊（healthchecks.io 慣例：正常完成 ping 本體、失敗 ping `/fail`；URL 樣板容許 `{status}` 佔位）。
+5. 文件：README 與「下班前 checklist」補 healthchecks.io / 自架 uptime-kuma 的設定範例——**建議的告警門檻 = 2 × (round_timeout + interval)**。
+
+**驗收**：`test_heartbeat_pinged_each_round`（mock urlopen 計數）、`test_heartbeat_failure_never_raises`、`test_finish_pings_status`。
+
+## T15｜run.lock 加 PID 存活檢查 + 安全接手
+
+**現況**：殘留鎖只靠 mtime 老化判定（`max(3600, 3×round_timeout)`），上次 crash 後要等最多三小時或人工刪鎖檔（README 教使用者裸手 `rm`——危險且不友善）。鎖檔其實已寫入 pid，只差一步驗活。
+
+**變更規格**：
+1. 鎖檔內容改為 JSON：`{"pid": …, "hostname": …, "started": …}`。
+2. `acquire_run_lock` 判定順序：
+   - 鎖存在且 **hostname 相同** → `os.kill(pid, 0)` 驗活：process 已死 → log「接手殘留鎖（pid=N 已不存在）」直接接手；活著 → `WorkspaceBusy`（不看 mtime）。
+   - hostname 不同（NFS/容器共享目錄）→ 退回既有 mtime 老化判定（跨機無法驗 pid）。
+3. 心跳 `touch_run_lock` 保留（跨機情境的老化判定仍需要）。
+
+**驗收**：`test_lock_takeover_dead_pid`、`test_lock_busy_alive_pid`、`test_lock_foreign_host_falls_back_to_mtime`。
+
+## T16｜每輪磁碟空間守衛
+
+**動機**：doctor 開跑前查一次磁碟，但整晚的 log / npm install / build 產物可能半夜填滿磁碟——**磁碟滿時 git 寫入會產生半套物件，是少數能真正毀掉還原點的故障**。與其寫壞，不如優雅停。
+
+**變更規格**：
+1. config 新增 `runtime.min_free_disk_mb: 500`。
+2. 引擎每輪頂端 `shutil.disk_usage(repo).free` 低於門檻 → log + `set_human_required(code="disk_low", suggested_action="清理磁碟（log/建置產物/docker）後 resume。")` → `finish("human_required", 2, "disk_low")`（走 T11 通知 + T12 報告路徑）。
+3. 低於 2× 門檻時先出一次 warning（給人時間在通知裡看到趨勢）。
+
+**驗收**：`test_disk_guard_halts_below_threshold`、`test_disk_guard_warns_at_2x`（mock disk_usage）。
+
+## T17｜agent CLI 版本遙測
+
+**動機**：agent CLI 半夜自動更新導致行為突變是真實故障模式；沒有版本記錄，「昨晚突然變笨」無法歸因。
+
+**變更規格**：
+1. run 啟動時（`run_started` record 前）對 `build_cmd` 的執行檔跑一次 `<exe> --version`（timeout 10s，失敗記 `"unknown"`），寫入 `run_started` record 的 `cli_version` 欄位。
+2. 與**上一個 run** 的 `run_started.cli_version` 不同 → log 一行「⚠ agent CLI 版本變更：A → B」，並在 RUN_REPORT（T12）的「時間與輪數」節標示。
+3. `loop doctor`（計畫書 2 T4）輸出同一資訊。
+
+**驗收**：`test_run_started_records_cli_version`、`test_report_flags_version_change`。
+
 ---
 
 ## 最終驗收清單（全部通過才算完成本計畫書）
@@ -193,7 +241,9 @@ revert_res.returncode != 0:
 - [ ] `grep -rn "tree_decompose\|min_unit" engine/ rules/ generators/` 零筆
 - [ ] 全新 tmp repo 走 init → `run.py --preflight` 不再出現 prompts error（T13 煙霧測試綠）
 - [ ] `grep -rn "reset --hard\|clean -fd" engine/` 零筆
-- [ ] `pytest engine/` 全綠，新增測試 ≥ 12 個（T1×2、T3、T4、T5、T6、T8、T9×3、T10、T11×2、T12×3）
+- [ ] `pytest engine/` 全綠，新增測試 ≥ 22 個（T1×2、T3、T4、T5、T6、T8、T9×3、T10、T11×2、T12×3、T14×3、T15×3、T16×2、T17×2）
+- [ ] 心跳：設 heartbeat_url 指向本地假 server 跑 3 輪，收到 ≥3 次 ping + finish 一擊；拔掉 server 迴圈照常跑
+- [ ] 殘留鎖：kill -9 引擎後立即重啟，秒級接手（不再等 mtime 老化）；引擎運行中重複啟動仍被擋
 - [ ] `ruff check` 零錯誤；CI workflow 存在且包含 pytest + ruff + preflight 煙霧
 - [ ] 手動整合驗證：用假 agent 指令（`build_cmd: "false"`）跑 `run.py --stage execute`，3 輪內以 `cli_failing` 停機、產出 RUN_REPORT.md、notify_cmd 假腳本被呼叫
 - [ ] README 與 engine/README.md 補上：notify_cmd / max_wall_seconds / RUN_REPORT / fast-fail 四項說明

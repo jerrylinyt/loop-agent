@@ -62,6 +62,9 @@
    | `loop approve-plan` | 見 T6 | |
    | `loop accept / reject [--note]` | 見 T8 | |
    | `loop worktree add/remove/list` | parallel.py | |
+   | `loop repomap` | 見 T10 | |
+   | `loop unlock / fsck` | 見 T11 | |
+   | `loop upgrade-ack` | 見 T12 | |
 3. 所有子命令共用 `--workspace/-w`；在非 code-repo 目錄執行時給出明確錯誤（找不到 `.loop/`）。
 4. 文件全面改版：README 的指令範例改用 `loop …`（`python3 run.py` 寫法移到「進階/無安裝」附註）；`generators/bootstrap.md` STEP 1/5 的指令同步改。
 
@@ -82,8 +85,9 @@
    （各檔的 build_cmd/模型名以該 CLI 當前實際語法為準，執行本計畫的 agent 需逐一查證後填寫，並在 notes 註明查證日期。）
 2. `loop init --profile <name>`：把 profile 的 `agent:` 區塊合併進生成的 `loop.config.yaml`（取代佔位值）；不帶 `--profile` 時互動列出可選 profile（含 `custom` = 保留佔位值）。
 3. profile 只是初始化時的**拷貝來源**，不參與 runtime cascade（避免又多一層設定來源）。
+4. **每輪成本上限**：watchdog 管時間不管錢——一輪 1 小時內 agent 可燒掉大量 token。各 profile 的 `build_cmd`/`extra_args` **必須**帶上該 CLI 支援的單次呼叫上限旗標（如 max-turns / max-budget 類，依各 CLI 實際旗標查證填寫，notes 註明數值理由與查證日期）；該 CLI 無此類旗標者在 notes 明示「無錢包上限，僅時間 watchdog」。
 
-**驗收**：`loop init /tmp/x --profile opencode` 後 config 無 `<佔位>` 字樣、preflight models 檢查綠；新測試 `test_init_profile_merge`。
+**驗收**：`loop init /tmp/x --profile opencode` 後 config 無 `<佔位>` 字樣、preflight models 檢查綠；新測試 `test_init_profile_merge`；四份 profile 均含成本上限旗標或明示豁免。
 
 ## T4｜`loop doctor`：含真實 smoke 呼叫的健檢
 
@@ -94,7 +98,8 @@
      - **agent CLI 冒煙**：用 `build_cmd` + `models.fast` 組指令，prompt 固定為 `Reply with exactly: OK`，timeout 120s。判定：rc==0 → pass；rc≠0 或逾時 → fail，印出 stderr 尾 20 行（**這是抓「token 過期/未登入/模型名錯」的唯一可靠手段**）。加 `--no-llm` 可跳過（CI 用）。
      - 磁碟剩餘空間 ≥ 2GB（`shutil.disk_usage`）。
      - `notify_cmd` 若有設：以 status=doctor 觸發一次，讓使用者確認通知收得到。
-2. 輸出末行固定：`DOCTOR OK（今晚可跑）` 或 `DOCTOR FAILED（N 項）`；exit code 0/1。
+2. 追加顯示：agent CLI 版本（計畫書 1 T17 的偵測邏輯），與上一個 run 記錄的版本不同時標示。
+3. 輸出末行固定：`DOCTOR OK（今晚可跑）` 或 `DOCTOR FAILED（N 項）`；exit code 0/1。
 
 **驗收**：新測試 `test_doctor_smoke_pass/fail`（build_cmd 指向 `echo OK` / `false`）；`loop doctor --no-llm` 在 CI 可跑。
 
@@ -189,13 +194,80 @@
 
 **驗收**：`test_repo_map_mechanical_content`（fixture repo 斷言含目錄樹/指令表/語言統計）、`test_repo_map_mirrors_multiple_files`（兩個鏡射目標同步更新且與正本一致）、`test_repo_map_managed_section_preserves_user_content`（既有知識檔的人寫內容在重生成後 byte-level 不變）、`test_prompt_repomap_pointer_and_embed_modes`（pointer/embed/off 三模式 + embed 超限退回 pointer）、`test_doctor_warns_stale_repomap`。
 
+## T11｜自救指令：`loop unlock` / `loop fsck`
+
+**動機**：狀態怪掉時，目前的處置是 README 教使用者裸手 `rm` 鎖檔、自己打開 state.json 看——對非框架作者的同事不友善也不安全。給一組安全的自救工具。
+
+**變更規格**：
+1. `loop unlock`：包裝計畫書 1 T15 的 PID 驗活邏輯——鎖的持有 process 還活著 → 拒絕並列出 pid/started 資訊（提示先停掉它）；已死 → 安全移除並提示可 resume。**絕不無條件刪鎖**。
+2. `loop fsck`：包裝 `state.py` 既有 `_check_invariants` + 結構檢查（JSON 可解析、schema 必要欄位、phases/tasks 引用一致、blocking 計數與 issues 索引相符），輸出逐項 OK/VIOLATION 與**建議處置**（例：「conv 超過門檻但 status 仍 DRAFTED → 檢查 rounds.jsonl 對應輪，必要時 `loop reset-execute --reset-to-task …`」）。唯讀，不自動修（修 = 價值判斷，交人）。
+3. 兩個指令都在 `human_required` 通知（計畫書 1 T11）與錯誤目錄（T13）中被引用為標準處置步驟。
+
+**驗收**：`test_unlock_refuses_alive_pid` / `test_unlock_removes_dead_lock`、`test_fsck_reports_violations_readonly`（跑完 state.json byte-level 不變）。
+
+## T12｜框架漂移守衛：`loop upgrade-ack`
+
+**動機**：`sync_framework_docs` 讓專案跟著框架 main 走——長專案跑到一半框架更新，rules 語意就變了：**plan 是舊規則下收斂的，執行卻用新規則**，行為漂移且不可歸因。
+
+**變更規格**：
+1. plan 收斂時（plan_loop 寫 `plan_status=converged` 處）記錄 `plan.framework_ref_at_convergence`（框架 HEAD short sha，取法沿用既有 framework_ref 快照邏輯）。
+2. execute 啟動時（sync_framework_docs 之前）比對當前框架 HEAD 與該值：不同 → preflight error：「框架已從 A 前進到 B（N commits），rules 語意可能變更。檢視框架 changelog 後執行 `loop upgrade-ack` 確認，或將 framework clone checkout 回 A。」
+3. `loop upgrade-ack`：把 `plan.framework_ref_at_convergence` 更新為當前框架 HEAD + 記錄 ack 人/時間（state events 稽核），下次啟動放行。
+4. 同一 run 內（run 已啟動後）框架變更不主動偵測（sync 已移到 run 起點，run 中不會再同步——計畫書 1 T6）。
+
+**驗收**：`test_execute_blocked_on_framework_drift`、`test_upgrade_ack_records_and_unblocks`、`test_no_drift_no_block`。
+
+## T13｜錯誤目錄 `docs/errors.md`
+
+**動機**：同事凌晨收到 `cli_failing` 通知時不該需要來問你。每個停機代碼一節：發生了什麼／為什麼／標準處置。
+
+**變更規格**：
+1. 新檔 `docs/errors.md`，涵蓋**全部** `human_required_code`（本系列完成後至少：`broken_control_file`、`agent_requested`、`stuck_level_2_hard_stop`、`max_rounds_reached`、`plan_not_converging`、`review_revert_failed`、`cli_failing`、`wall_clock_reached`、`disk_low`、`state_too_large`、`frozen_blocked`、`framework_drift`）。每節固定三段：**這是什麼／常見原因／處置步驟**（處置引用 `loop doctor / unlock / fsck / resume / reset-*` 等具體指令）。
+2. 通知（計畫書 1 T11 的 `{code}`）與 RUN_REPORT 的「待你裁決」節帶上 `docs/errors.md#<code>` 連結。
+3. **同步防漏**：CI 加一個測試——掃 engine 原始碼中所有 `set_human_required(...code=` / `set_plan_human_required(...code=` 的字面 code，斷言每個都在 errors.md 有對應標題（新增停機代碼忘了寫文件 → CI 紅）。
+
+**驗收**：`test_error_catalog_covers_all_codes`（即上述 CI 測試）；人工抽讀三節可照做。
+
+## T14｜`loop status` 加進度與 ETA
+
+**變更規格**：
+1. `loop status` 輸出追加：目前 run 的輪數/牆鐘時間、當前任務、任務完成度（CONVERGED/總數，分 phase）、**粗估剩餘時間** = 剩餘預估輪數 ×（本 run `round_finished.duration_seconds` 的移動平均）。剩餘預估輪數 = Σ 未完成任務 ×（1 + 各自 threshold）+ 最終 phase 剩餘 pass 數（與 PLAN_SUMMARY 公式同源，抽共用函式）。
+2. 標注「粗估，計畫書 5 落地後將以歷史校正係數修正」；樣本 < 5 輪時顯示「估算中」。
+3. `--watch` flag：每 30s 重繪一屏（放下去跑之前盯一下的場景）。
+
+**驗收**：`test_status_eta_formula`（fixture state+rounds 斷言 ETA 數字）、`test_status_watch_refreshes`（可用 mock/縮短間隔驗證）。
+
+## T15｜通知靜音時段
+
+**變更規格**：
+1. config 新增 `runtime.notify_quiet_hours: ""`（如 `"23:00-07:00"`，空 = 不靜音）。
+2. 靜音時段內：**致命級**（human_required 全部代碼、disk_low、cli_failing）照發；**非致命級**（complete、smoke_finished、未來 H1.2 的 QUESTION 級）寫入 `.loop/<ws>/.loop_state/notify_queue.jsonl` 不發。
+3. 佇列消化：下次任何 notify 觸發時若已出靜音時段，先把佇列合併成一則 digest（「昨夜累積 N 則：…」）帶出；引擎已停的情況由 `loop status` / `loop report` 執行時檢查並提示（不依賴常駐程序）。
+4. 「下班前 checklist」對應更新（建議設定值範例）。
+
+**驗收**：`test_quiet_hours_defers_nonfatal_and_passes_fatal`、`test_digest_flushes_after_quiet`。
+
+## T16｜範例教學專案 `examples/`
+
+**動機**：同事第一次用不該拿真專案冒險。一個 30 分鐘可跑完的迷你任務，比任何文件都有效。
+
+**變更規格**：
+1. `examples/mini-migration/`：一個 20 檔以內的假 legacy 專案（如 2 隻舊式 API + 1 個簡單頁面）+ **已填好的** `REQUIREMENTS.md`（含依 `acceptance-standards.md` 寫好的 DoD 與 parity 驗收）+ 一頁 `TUTORIAL.md`（從 `loop init --profile …` 到 `loop accept` 的完整劇本，每步附預期輸出截句）。
+2. 設計原則：任務小到用 fast 模型 ≤ 30 輪內可完成；verify 全部 `command` 型（體驗客觀驗證的完整閉環）；故意留一個需要開 Issue 的小陷阱（讓學員見過一次「不腦補、開 Issue」的正確行為）。
+3. README「怎麼開始」第一行改為指向 tutorial：「第一次用？先花 30 分鐘跑 examples/mini-migration。」
+
+**驗收**：一位未參與開發的同事（或執行本計畫的 agent 以全新環境模擬）照 TUTORIAL 從零跑通並 `loop accept`，過程無需查閱 tutorial 以外的文件；卡住點回饋修進 tutorial。
+
 ---
 
 ## 最終驗收清單
 
 - [ ] 全新 repo 端到端手動演練一次完整劇本：`loop init --profile … → confirm-requirements → plan → approve-plan → doctor → smoke → run →（模擬完成）→ report → accept --merge`，每步輸出符合本計畫書描述
 - [ ] base branch 全程零新 commit；所有 loop commit 在 `loop/<ws>/<ts>` 分支
-- [ ] `pytest engine/` 全綠，本計畫新增測試 ≥ 14 個
+- [ ] `pytest engine/` 全綠，本計畫新增測試 ≥ 24 個（含 T11×3、T12×3、T13×1、T14×2、T15×2）
+- [ ] `docs/errors.md` 覆蓋全部停機代碼（CI 同步防漏測試綠）；通知與 RUN_REPORT 帶錨點連結
+- [ ] 框架漂移演練：plan 收斂後手動在框架 clone 加一個 commit → execute 被擋 → `loop upgrade-ack` 後放行
+- [ ] 教學專案由未參與開發者從零跑通至 `loop accept`
 - [ ] gated 模式下未 approve-plan 無法進 execute（preflight error 實測）
 - [ ] `loop resume --note` 的附註確實出現在下一輪 agent prompt（log 可查），3 輪後消失
 - [ ] README、engine/README.md、bootstrap.md、checklist 文件一致採用 `loop` CLI 為主要入口
